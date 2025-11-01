@@ -277,7 +277,8 @@
 		<div
 			class="absolute inset-0 bg-cover bg-center transition-all"
 			style="background-image: url({bannerPhotos[currentBannerIndex]})"
-		></div>
+		>
+	</div>
 	{:else}
 		<div class="absolute inset-0 flex items-center justify-center bg-gray-700 text-white">
 			Cargar Banner

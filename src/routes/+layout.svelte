@@ -77,7 +77,7 @@
 	<!-- Logo -->
 	<a href="/" class="flex items-center space-x-3">
 		<div class="logo h-10 w-10 rounded-full bg-gray-200"></div>
-		<span class="text-2xl font-bold text-gray-800">Ero Senin</span>
+		<span class="text-2xl font-bold text-gray-800">aplicacionesParaguay</span>
 	</a>
 
 	<!-- Botón menú / usuario -->
