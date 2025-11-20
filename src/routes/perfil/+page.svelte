@@ -106,7 +106,7 @@
 			.from('profiles')
 			.select('*')
 			.eq('id', $session.user.id)
-			.single();
+			.maybeSingle();
 		if (error && error.code !== 'PGRST116') {
 			console.error('Error loading profile:', error);
 			return;
@@ -610,12 +610,13 @@
 ============================ -->
 
 <!-- Banner -->
-<div class="relative h-64 w-full overflow-hidden bg-gray-900">
+<div class="w-ful relative h-64 bg-gray-900">
 	{#if bannerPhotos.length > 0}
-		<div
-			class="absolute inset-0 bg-cover bg-center transition-all"
-			style="background-image: url({bannerPhotos[currentBannerIndex]})"
-		></div>
+		<img
+			src={bannerPhotos[currentBannerIndex]}
+			alt="Banner"
+			class="imgBanner mx-auto block h-full rounded-lg object-fill object-center"
+		/>
 	{:else}
 		<div class="absolute inset-0 flex items-center justify-center bg-gray-700 text-white">
 			Cargar Banner
@@ -625,17 +626,17 @@
 	<!-- Flechas -->
 	<button
 		on:click={prevBanner}
-		class="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/70 p-2 hover:bg-white"
+		class="absolute top-1/2 left-2 -translate-y-1/2 rounded-full bg-white/70 p-2 hover:bg-white"
 		>◀</button
 	>
 	<button
 		on:click={nextBanner}
-		class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/70 p-2 hover:bg-white"
+		class="absolute top-1/2 right-2 -translate-y-1/2 rounded-full bg-white/70 p-2 hover:bg-white"
 		>▶</button
 	>
 
 	<!-- Menú del banner -->
-	<div class="absolute right-4 top-4">
+	<div class="absolute top-4 right-4">
 		<div class="relative">
 			<button
 				bind:this={buttonRef}
@@ -682,11 +683,12 @@
 	<div class="relative rounded-xl border border-gray-200 bg-white p-6 shadow-lg md:p-8">
 		<!-- Edit Button (mantengo) -->
 		<button
+			type="button"
 			on:click={() => {
 				editing = !editing;
 				if (!editing) saveProfile();
 			}}
-			class="absolute right-4 top-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+			class="absolute top-4 right-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
 			disabled={saving}
 		>
 			{#if editing}
@@ -734,11 +736,11 @@
 						placeholder="Describe tu experiencia..."
 						class="w-full resize-none rounded-lg border border-gray-300 px-4 py-3 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
 					></textarea>
-					<div class="absolute bottom-3 right-3 text-sm text-gray-500">{bio.length}/500</div>
+					<div class="absolute right-3 bottom-3 text-sm text-gray-500">{bio.length}/500</div>
 				{:else if bio}
-					<p class="whitespace-pre-wrap leading-relaxed text-gray-700">{bio}</p>
+					<p class="leading-relaxed whitespace-pre-wrap text-gray-700">{bio}</p>
 				{:else}
-					<p class="italic text-gray-500">Añade una descripción profesional...</p>
+					<p class="text-gray-500 italic">Añade una descripción profesional...</p>
 				{/if}
 			</div>
 		</div>
@@ -830,7 +832,7 @@
 			{/if}
 
 			<!-- GRID de fotos/videos -->
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+			<div class="relative grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
 				{#each photos as photo}
 					<div class="group relative">
 						{#if photo.public_url && photo.filename && photo.filename.match(/\.(mp4|webm|ogg|mov)$/i)}
@@ -846,27 +848,30 @@
 							</div>
 						{:else}
 							<img
+								type="image"
 								src={photo.thumbnail_url ?? photo.public_url}
 								alt={photo.titulo || 'Foto'}
-								class="h-48 w-full cursor-pointer rounded-lg object-cover"
+								class="h-full w-full rounded-lg object-cover object-fill"
 								on:click={() => openPhotoModal(photo)}
 							/>
 						{/if}
 
 						<div
-							class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-0 opacity-0 transition-all group-hover:bg-opacity-50 group-hover:opacity-100"
+							class="bg-opacity-0 group-hover:bg-opacity-50 absolute inset-0 flex items-center justify-center bg-black opacity-0 transition-all group-hover:opacity-100"
 						>
 							<button
+								type="button"
 								on:click={() => deletePhoto(photo.id)}
 								class="mr-2 rounded-lg bg-red-500 p-2 text-white">🗑️ Borrar</button
 							>
 							<button
+								type="button"
 								on:click={() => openPhotoModal(photo)}
 								class="rounded-lg bg-blue-500 p-2 text-white">👁️ Ver</button
 							>
 						</div>
 						{#if photo.titulo}
-							<div class="absolute bottom-0 w-full bg-black bg-opacity-60 p-2 text-sm text-white">
+							<div class="bg-opacity-60 absolute bottom-0 w-full bg-black p-2 text-sm text-white">
 								{photo.titulo}
 							</div>
 						{/if}
@@ -877,11 +882,13 @@
 
 		<!-- Modal de Foto/Video Grande -->
 		{#if selectedPhoto}
-			<div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75">
+			<div
+				class="bg-opacity-75 fixed relative inset-0 z-50 flex items-center justify-center bg-black"
+			>
 				<div class="relative w-full max-w-4xl rounded-lg bg-white p-4">
 					<button
 						on:click={() => (selectedPhoto = null)}
-						class="absolute right-2 top-2 text-2xl text-gray-600 hover:text-gray-800">×</button
+						class="absolute top-2 right-2 text-2xl text-gray-600 hover:text-gray-800">×</button
 					>
 
 					{#if selectedPhoto.filename && selectedPhoto.filename.match(/\.(mp4|webm|ogg|mov)$/i)}

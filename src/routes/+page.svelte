@@ -104,18 +104,13 @@ function nextBanner(pub) {
 	{#each publicaciones as pub}
 		<div
 			class="relative overflow-hidden rounded-xl bg-white shadow hover:shadow-xl transition"
-			tabindex="0"
 		>
 			<!-- IMAGEN CON NAVEGACIÓN -->
-			<div
-				class="relative cursor-pointer w-full"
-				on:click={() => verPerfil(pub.id)}
-				aria-label={`Ver perfil de ${pub.nombre}`}
-			>
+			<div class="relative cursor-pointer w-full" on:click={() => verPerfil(pub.id)} role="button" tabindex="0" on:keydown={(e) => e.key === 'Enter' && verPerfil(pub.id)}>
 				<img
 					src={pub.banners[pub.currentIndex]}
 					alt={`Banner de ${pub.nombre}`}
-					class="h-48 w-full object-cover rounded-t-xl transition-all duration-300"
+					class="rounded-t-xl transition-all duration-300 w-full h-full object-cover"
 				/>
 
 				<!-- FLECHAS: solo si hay más de 1 foto -->
@@ -124,6 +119,7 @@ function nextBanner(pub) {
 						class="absolute left-2 top-1/2 -translate-y-1/2 bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-opacity-70 focus:outline-none z-10"
 						on:click|stopPropagation={() => prevBanner(pub)}
 						aria-label="Anterior banner"
+						type="button"
 					>
 						←
 					</button>
@@ -132,6 +128,7 @@ function nextBanner(pub) {
 						class="absolute right-2 top-1/2 -translate-y-1/2 bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-opacity-70 focus:outline-none z-10"
 						on:click|stopPropagation={() => nextBanner(pub)}
 						aria-label="Siguiente banner"
+						type="button"
 					>
 						→
 					</button>

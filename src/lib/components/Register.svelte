@@ -13,7 +13,6 @@
   let repeatPassword = '';
   let showPassword = false;
   let showRepeat = false;
-  let nombre = '';
   let error = '';
   let message = '';
 
@@ -21,7 +20,7 @@
     error = '';
     message = '';
 
-    if (!email.trim() || !password.trim() || !repeatPassword.trim() || !nombre.trim()) {
+    if (!email.trim() || !password.trim() || !repeatPassword.trim()) {
       error = 'Completa todos los campos';
       return;
     }
@@ -36,7 +35,6 @@
         email,
         password,
         options: {
-          data: { nombre }, // ✅ guarda el nombre en el perfil
           emailRedirectTo: `${window.location.origin}/`
         }
       });
@@ -52,7 +50,6 @@
       email = '';
       password = '';
       repeatPassword = '';
-      nombre = '';
     } catch (e) {
       error = e.message || 'Error al registrarse';
     }
@@ -80,17 +77,6 @@
         type="email"
         bind:value={email}
         placeholder="ejemplo@email.com"
-        class="border p-2 rounded w-full"
-        required
-      />
-    </div>
-
-    <div class="mb-4">
-      <label class="block text-gray-700 mb-1">Nombre o Alias</label>
-      <input
-        type="text"
-        bind:value={nombre}
-        placeholder="Tu nombre visible"
         class="border p-2 rounded w-full"
         required
       />

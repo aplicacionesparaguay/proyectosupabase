@@ -14,4 +14,4 @@
       <UploadPhoto {userId} onUpload={() => goto('/')} /> <!-- Redirige al grid después de subir -->
     </div>
   {/if}
-</div>  
+</div>

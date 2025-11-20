@@ -73,7 +73,7 @@
 	}
 </script>
 
-<header class="top-0 z-10 flex items-center justify-between p-4">
+<header class="top-0 z-10 flex items-center justify-between p-4 bg-white shadow-md">
 	<!-- Logo -->
 	<a href="/" class="flex items-center space-x-3">
 		<div class="logo h-10 w-10 rounded-full bg-gray-200"></div>
