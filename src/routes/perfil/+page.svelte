@@ -600,22 +600,15 @@
 			await loadPhotos();
 		}, 'image/*,video/*');
 	}
-
-	// ------------------ FIN helpers ------------------
 </script>
 
-<!-- ============================
-     HTML: Banner + Preview UI + Álbum con vista previa y opciones
-     Mantengo tu markup y agrego la sección de preview antes del botón subir
-============================ -->
-
 <!-- Banner -->
-<div class="w-ful relative h-64 bg-gray-900">
+<div class="w-full relative h-64">
 	{#if bannerPhotos.length > 0}
 		<img
 			src={bannerPhotos[currentBannerIndex]}
 			alt="Banner"
-			class="imgBanner mx-auto block h-full rounded-lg object-fill object-center"
+			class="mx-auto block h-full rounded-lg object-fill object-center"
 		/>
 	{:else}
 		<div class="absolute inset-0 flex items-center justify-center bg-gray-700 text-white">

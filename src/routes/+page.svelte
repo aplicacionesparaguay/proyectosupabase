@@ -10,32 +10,21 @@
 	async function loadProfilesWithBanners() {
 		const { data: profiles, error: pErr } = await supabase
 			.from('profiles')
-			.select('id, nombre, fecha_nacimiento, pais, ciudad')
+			.select('id, nombre, fecha_nacimiento, pais, ciudad, is_online')
 			.order('nombre', { ascending: true });
 
-		if (pErr) {
-			console.error('Error al cargar perfiles:', pErr);
+		if (pErr || !profiles?.length) {
 			publicaciones = [];
 			return;
 		}
 
-		if (!profiles?.length) {
-			publicaciones = [];
-			return;
-		}
+		const ids = profiles.map(p => p.id);
 
-		const ids = profiles.map((r) => r.id);
-
-		const { data: banners, error: bErr } = await supabase
+		const { data: banners } = await supabase
 			.from('user_banners')
 			.select('user_id, public_url, orden')
 			.in('user_id', ids)
-			.order('orden', { ascending: true });
-
-		if (bErr) {
-			console.error('Error al cargar banners:', bErr);
-			return;
-		}
+			.order('orden');
 
 		const bannersByUser = {};
 		for (const b of banners || []) {
@@ -44,7 +33,7 @@
 		}
 
 		let lista = profiles
-			.map((p) => {
+			.map(p => {
 				const userBanners = bannersByUser[p.id] || [];
 				if (userBanners.length === 0) return null;
 
@@ -54,6 +43,7 @@
 					fecha_nacimiento: p.fecha_nacimiento || null,
 					pais: p.pais || '',
 					ciudad: p.ciudad || '',
+					is_online: p.is_online || false,
 					banners: userBanners,
 					currentIndex: 0
 				};
@@ -70,16 +60,17 @@
 	}
 
 	function prevBanner(pub) {
-	if (!pub.banners?.length) return;
-	pub.currentIndex = (pub.currentIndex - 1 + pub.banners.length) % pub.banners.length;
-	publicaciones = publicaciones;
-}
+		if (!pub.banners?.length) return;
+		pub.currentIndex = (pub.currentIndex - 1 + pub.banners.length) % pub.banners.length;
+		publicaciones = publicaciones;
+	}
 
-function nextBanner(pub) {
-	if (!pub.banners?.length) return;
-	pub.currentIndex = (pub.currentIndex + 1) % pub.banners.length;
-	publicaciones = publicaciones;
-}
+	function nextBanner(pub) {
+		if (!pub.banners?.length) return;
+		pub.currentIndex = (pub.currentIndex + 1) % pub.banners.length;
+		publicaciones = publicaciones;
+	}
+
 	function verPerfil(id) {
 		goto(`/perfil/${id}`);
 	}
@@ -99,58 +90,68 @@ function nextBanner(pub) {
 	});
 </script>
 
-<!-- GRID DE USUARIOS -->
-<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 p-4">
+<!-- GRID DE USUARIOS - SEXY EDITION -->
+<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 p-6 bg-black/90 min-h-screen">
+
 	{#each publicaciones as pub}
-		<div
-			class="relative overflow-hidden rounded-xl bg-white shadow hover:shadow-xl transition"
-		>
+		<div class="relative overflow-hidden rounded-2xl bg-gradient-to-b from-pink-900/20 to-black/60 backdrop-blur-md border border-pink-800/40 shadow-2xl hover:shadow-pink-600/40 transition-all duration-500 group">
+
 			<!-- IMAGEN CON NAVEGACIÓN -->
-			<div class="relative cursor-pointer w-full" on:click={() => verPerfil(pub.id)} role="button" tabindex="0" on:keydown={(e) => e.key === 'Enter' && verPerfil(pub.id)}>
+			<div 
+				class="relative cursor-pointer w-full aspect-[3/4]" 
+				on:click={() => verPerfil(pub.id)} 
+				role="button" 
+				tabindex="0" 
+				on:keydown={(e) => e.key === 'Enter' && verPerfil(pub.id)}
+			>
 				<img
 					src={pub.banners[pub.currentIndex]}
 					alt={`Banner de ${pub.nombre}`}
-					class="rounded-t-xl transition-all duration-300 w-full h-full object-cover"
+					class="w-full h-full object-cover rounded-2xl transition-transform duration-700 group-hover:scale-110"
 				/>
 
-				<!-- FLECHAS: solo si hay más de 1 foto -->
+				<!-- Overlay sensual -->
+				<div class="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent"></div>
+
+				<!-- FLECHAS SEXY -->
 				{#if pub.banners.length > 1}
 					<button
-						class="absolute left-2 top-1/2 -translate-y-1/2 bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-opacity-70 focus:outline-none z-10"
+						class="absolute left-3 top-1/2 -translate-y-1/2 bg-white/10 backdrop-blur-md text-pink-300 rounded-full p-3 hover:bg-white/30 hover:text-white transition z-10"
 						on:click|stopPropagation={() => prevBanner(pub)}
-						aria-label="Anterior banner"
-						type="button"
-					>
-						←
-					</button>
-
+					>←</button>
 					<button
-						class="absolute right-2 top-1/2 -translate-y-1/2 bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-opacity-70 focus:outline-none z-10"
+						class="absolute right-3 top-1/2 -translate-y-1/2 bg-white/10 backdrop-blur-md text-pink-300 rounded-full p-3 hover:bg-white/30 hover:text-white transition z-10"
 						on:click|stopPropagation={() => nextBanner(pub)}
-						aria-label="Siguiente banner"
-						type="button"
-					>
-						→
-					</button>
+					>→</button>
+				{/if}
+
+				<!-- PUNTOS INDICADORES -->
+				{#if pub.banners.length > 1}
+					<div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-10">
+						{#each pub.banners as _, i}
+							<div class={`w-2 h-2 rounded-full transition-all ${i === pub.currentIndex ? 'bg-pink-400 shadow-lg shadow-pink-400/60' : 'bg-white/40'}`}></div>
+						{/each}
+					</div>
 				{/if}
 			</div>
 
-			{#if pub.banners.length > 1}
-	<div class="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
-		{#each pub.banners as _, i}
-			<div
-				class={`w-2 h-2 rounded-full transition ${
-					i === pub.currentIndex ? 'bg-white' : 'bg-white/50'
-				}`}
-			></div>
-		{/each}
-	</div>
-{/if}
+			<!-- INFO + PUNTO ONLINE -->
+			<div class="absolute bottom-0 left-0 right-0 p-5 text-center">
+				<div class="flex items-center justify-center gap-3">
+					<p class="text-2xl font-bold text-white drop-shadow-2xl">{pub.nombre}</p>
+					
+					<!-- PUNTO VERDE/ROJO -->
+					<div class="relative">
+						{#if pub.is_online}
+							<div class="w-4 h-4 bg-emerald-400 rounded-full shadow-lg shadow-emerald-400/60 animate-pulse"></div>
+							<div class="absolute inset-0 w-4 h-4 bg-emerald-400 rounded-full animate-ping opacity-75"></div>
+						{:else}
+							<div class="w-4 h-4 bg-red-600/80 rounded-full shadow-lg"></div>
+						{/if}
+					</div>
+				</div>
 
-			<!-- INFO -->
-			<div class="p-3 text-center">
-				<p class="font-semibold text-gray-800">{pub.nombre}</p>
-				<p class="text-sm text-gray-500">
+				<p class="text-pink-300 text-sm mt-1">
 					{#if pub.fecha_nacimiento}{calcularEdad(pub.fecha_nacimiento)}{/if}
 					{#if pub.pais} - {pub.pais}{/if}
 					{#if pub.ciudad} ({pub.ciudad}){/if}
@@ -160,7 +161,7 @@ function nextBanner(pub) {
 	{/each}
 </div>
 
-<!-- MENSAJE NO LOGUEADO -->
+<!-- MENSAJE NO LOGUEADO (sin tocar textos ni colores) -->
 {#if !logeado}
 	<p class="mt-6 text-center text-gray-600">
 		Para interactuar con los creadores debes
