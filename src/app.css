@@ -23,13 +23,8 @@
 
 body {
 	min-height: 100vh;
-	margin: 0;
-	background-attachment: fixed;
-	background-color: var(--color-bg-1);
-	background-size: 100vw 100vh;
-	background-image:
-		radial-gradient(50% 50% at 50% 50%, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0) 100%),
-		linear-gradient(180deg, var(--color-bg-0) 0%, var(--color-bg-1) 15%, var(--color-bg-2) 50%);
+	background-image: linear-gradient(to top, black, #2d1b3a, #3b1b4a);
+	color: #fad1d1;
 }
 
 h1,
@@ -94,4 +89,8 @@ button:focus:not(:focus-visible) {
 	h1 {
 		font-size: 2.4rem;
 	}
+}
+
+.botonshow {
+	z-index: 1000009999999999999999999990;
 }

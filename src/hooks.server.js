@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { supabase } from '$lib/supabaseClient';
 import { redirect } from '@sveltejs/kit';
 

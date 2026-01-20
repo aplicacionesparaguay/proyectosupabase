@@ -56,7 +56,7 @@
   }
 </script>
 
-<div class="mx-auto mt-32 w-full max-w-md rounded-2xl bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 p-8 shadow-2xl border border-pink-200">
+<div class="mx-auto mt-3 w-full max-w-md rounded-2xl bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 p-8 shadow-2xl border border-pink-200">
   <h2 class="mb-8 text-center text-3xl font-bold text-pink-900 drop-shadow-sm">
     Únete a Kuña Guapa 💋
   </h2>
@@ -69,7 +69,7 @@
 
   {#if message}
     <div class="mb-5 rounded-lg bg-gradient-to-r from-pink-100 to-rose-100 p-5 text-center text-pink-800 border border-pink-300 shadow-inner">
-      <p class="font-bold text-lg">¡Bienvenida, preciosa!</p>
+      <p class="font-bold text-lg">¡Bienvenido!</p>
       <p class="mt-1">{message}</p>
     </div>
   {/if}
@@ -130,7 +130,7 @@
       type="submit"
       class="w-full rounded-xl bg-gradient-to-r from-pink-600 to-fuchsia-600 py-4 font-bold text-white text-lg shadow-lg hover:from-pink-700 hover:to-fuchsia-700 transform hover:scale-105 transition-all duration-200"
     >
-      Entrar al paraíso 💕
+      Registrarse 💕
     </button>
   </form>
 </div>
