@@ -4,6 +4,7 @@
 	import { session } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
 
+	/** @type {Array<{id: string, nombre: string, fecha_nacimiento: string | null, pais: string, ciudad: string, is_online: boolean, banners: string[], currentIndex: number}>} */
 	let publicaciones = [];
 	$: logeado = $session !== null;
 
@@ -90,15 +91,15 @@
 	});
 </script>
 
-<!-- GRID DE USUARIOS - SEXY EDITION -->
-<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 p-6 bg-black/90 min-h-screen">
+<!-- GRID DE USUARIOS - EDICIÓN SEXY -->
+<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 p-6 bg-black/90 min-h-screen z-0">
 
 	{#each publicaciones as pub}
-		<div class="relative overflow-hidden rounded-2xl bg-gradient-to-b from-pink-900/20 to-black/60 backdrop-blur-md border border-pink-800/40 shadow-2xl hover:shadow-pink-600/40 transition-all duration-500 group">
+		<div class="relative overflow-hidden rounded-2xl bg-gradient-to-b from-pink-900/20 to-black/60 backdrop-blur-md border border-pink-800/40 shadow-2xl hover:shadow-pink-600/40 transition-all duration-500 group z-0">
 
 			<!-- IMAGEN CON NAVEGACIÓN -->
 			<div 
-				class="relative cursor-pointer w-full aspect-[3/4]" 
+				class="relative w-full aspect-[3/4] cursor-pointer" 
 				on:click={() => verPerfil(pub.id)} 
 				role="button" 
 				tabindex="0" 
@@ -110,7 +111,7 @@
 					class="w-full h-full object-cover rounded-2xl transition-transform duration-700 group-hover:scale-110"
 				/>
 
-				<!-- Overlay sensual -->
+				<!-- Superposición sensual -->
 				<div class="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent"></div>
 
 				<!-- FLECHAS SEXY -->
@@ -118,11 +119,11 @@
 					<button
 						class="absolute left-3 top-1/2 -translate-y-1/2 bg-white/10 backdrop-blur-md text-pink-300 rounded-full p-3 hover:bg-white/30 hover:text-white transition z-10"
 						on:click|stopPropagation={() => prevBanner(pub)}
-					>←</button>
+					>◀</button>
 					<button
 						class="absolute right-3 top-1/2 -translate-y-1/2 bg-white/10 backdrop-blur-md text-pink-300 rounded-full p-3 hover:bg-white/30 hover:text-white transition z-10"
 						on:click|stopPropagation={() => nextBanner(pub)}
-					>→</button>
+					>▶</button>
 				{/if}
 
 				<!-- PUNTOS INDICADORES -->
@@ -161,16 +162,16 @@
 	{/each}
 </div>
 
-<!-- MENSAJE NO LOGUEADO (sin tocar textos ni colores) -->
+<!-- MENSAJE NO LOGUEADO -->
 {#if !logeado}
-	<p class="mt-6 text-center text-gray-600">
+	<p class="mt-6 text-center text-gray-100">
 		Para interactuar con los creadores debes
 		<a href="/login" class="font-semibold text-green-600">iniciar sesión</a>.
 	</p>
 {:else}
 	<div class="mt-6 text-center">
 		<p class="text-green-600">
-			¡Bienvenido, {$session?.user?.email}! Puedes interactuar con los perfiles.
+			¡Bienvenido, {$session?.user?.email || 'Usuario'}! Puedes interactuar con los perfiles.
 		</p>
 	</div>
 {/if}

@@ -47,9 +47,9 @@
   }
 </script>
 
-<div class="mx-auto mt-32 w-full max-w-md rounded-2xl bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 p-8 shadow-2xl border border-pink-200">
+<div class="mx-auto mt-3 w-full max-w-md rounded-2xl bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 p-8 shadow-2xl border border-pink-200">
   <h2 class="mb-8 text-center text-3xl font-bold text-pink-900 drop-shadow-sm">
-    ¡Te extrañamos, preciosa! 💕
+    Iniciar Sessión 💕
   </h2>
 
   {#if error}
@@ -62,11 +62,11 @@
 
     <!-- Email o Teléfono -->
     <div>
-      <label class="block text-pink-800 font-medium mb-2">Email o Teléfono</label>
+      <label class="block text-pink-800 font-medium mb-2">Email</label>
       <input
         type="text"
         bind:value={credential}
-        placeholder="+595981234567 o hola@ejemplo.com"
+        placeholder="tunombre@ejemplo.com"
         required
         class="w-full rounded-xl border-2 border-pink-200 bg-white/80 px-5 py-3.5 text-pink-900 placeholder-pink-400 focus:border-fuchsia-500 focus:outline-none focus:ring-4 focus:ring-fuchsia-100 transition"
       />
@@ -104,7 +104,7 @@
       type="submit"
       class="w-full rounded-xl bg-gradient-to-r from-pink-600 to-fuchsia-600 py-4 font-bold text-white text-lg shadow-lg hover:from-pink-700 hover:to-fuchsia-700 transform hover:scale-105 transition-all duration-200"
     >
-      Entrar al paraíso 🔥
+      Acceder 🔥
     </button>
   </form>
 </div>

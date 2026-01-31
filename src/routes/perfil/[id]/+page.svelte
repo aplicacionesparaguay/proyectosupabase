@@ -1,3 +1,4 @@
+<!-- Perfiles de las chicas e iniciar negocios -->
 <script>
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
@@ -87,9 +88,9 @@
 		<div class="rounded-xl border border-gray-200 bg-white p-6 shadow-lg md:p-8">
 
 			<!-- BANNER -->
-			<div class="relative h-64 w-full overflow-hidden bg-gray-900 mb-6 rounded-xl">
+			<div class="w-full relative h-64">
 				{#if banners.length}
-					<img src={banners[currentBannerIndex].public_url} alt="Banner"
+					<img src={banners[currentBannerIndex].public_url} alt="Banner" vc
 					     class="absolute inset-0 h-full w-full object-cover transition-all duration-300" />
 
 					{#if banners.length > 1}
