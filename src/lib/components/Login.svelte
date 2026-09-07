@@ -22,11 +22,10 @@
     }
 
     try {
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email: credential.includes('@') ? credential : undefined,
-        phone: credential.startsWith('+') ? credential : undefined,
-        password
-      });
+      const credentials = credential.includes('@')
+        ? { email: credential, password }
+        : { phone: credential, password };
+      const { data, error: authError } = await supabase.auth.signInWithPassword(credentials);
 
       if (authError) {
         // Usuario no existe -> redirigir a Register
@@ -42,7 +41,7 @@
       user.set(data.user);
       goto('/');
     } catch (e) {
-      error = e.message || 'Error al iniciar sesión';
+      error = e instanceof Error ? e.message : 'Error al iniciar sesión';
     }
   }
 </script>

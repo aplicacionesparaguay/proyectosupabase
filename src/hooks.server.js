@@ -1,15 +1,31 @@
 // @ts-nocheck
-import { supabase } from '$lib/supabaseClient';
 import { redirect } from '@sveltejs/kit';
+import { createSupabaseServerClient } from '$lib/server/supabase';
 
 export const handle = async ({ event, resolve }) => {
-	const { data: { session } } = await supabase.auth.getSession();
-	event.locals.session = session;
+	event.locals.supabase = createSupabaseServerClient(event.cookies);
+	event.locals.session = null;
+	event.locals.user = null;
 
-	// Si está logeado y va a login/register, redirige
-	const protectedPaths = ['/login', '/register'];
-	if (session && protectedPaths.includes(event.url.pathname)) {
+	const {
+		data: { user },
+		error,
+	} = await event.locals.supabase.auth.getUser();
+	if (!error) {
+		event.locals.user = user;
+	}
+
+	const pathname = event.url.pathname;
+
+	// Usuario logueado no necesita ver login/register
+	const authPaths = ['/login', '/register'];
+	if (event.locals.user && authPaths.includes(pathname)) {
 		throw redirect(302, '/');
+	}
+
+	// El panel de perfil propio requiere sesión (las vistas públicas /perfil/[id] no)
+	if (!event.locals.user && pathname === '/perfil') {
+		throw redirect(302, '/login');
 	}
 
 	return resolve(event);

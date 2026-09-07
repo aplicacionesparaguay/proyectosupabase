@@ -1,8 +1,10 @@
 <!-- Perfiles de las chicas e iniciar negocios -->
 <script>
+	// @ts-nocheck
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { supabase } from '$lib/supabaseClient';
+	import { session } from '$lib/stores/auth';
 
 	let user = null;
 	let banners = [];
@@ -11,6 +13,8 @@
 	let selectedPhoto = null;
 	let loading = true;
 	let error = null;
+	let subscribed = false;
+	let isOwner = false;
 
 	onMount(async () => {
 		try {
@@ -18,31 +22,65 @@
 
 			const { data: profile, error: pErr } = await supabase
 				.from('profiles')
-				.select('*, whatsapp, twitter_url, instagram_url, website_url, direccion')
+				.select('*')
 				.eq('id', id)
 				.single();
 
 			if (pErr || !profile) throw pErr || new Error('Perfil no encontrado');
 			user = profile;
 
+			const me = $session?.user?.id;
+			isOwner = !!me && me === id;
+			if (me) {
+				const { data: sub } = await supabase
+					.from('suscripciones')
+					.select('id')
+					.eq('creator_id', id)
+					.eq('subscriber_id', me)
+					.eq('status', 'activa')
+					.maybeSingle();
+				subscribed = !!sub;
+			}
+
 			const { data: bData } = await supabase
-				.from('user_banners')
-				.select('public_url, orden')
+				.from('media')
+				.select('id, public_url, orden')
 				.eq('user_id', id)
+				.eq('tipo', 'banner')
 				.order('orden', { ascending: true });
 			banners = bData || [];
 
+			// RLS filtra: públicas para todos, privadas solo para dueña/suscriptoras.
 			const { data: phData, error: phErr } = await supabase
-				.from('user_photos')
-				.select('id, public_url, titulo, descripcion')
+				.from('media')
+				.select('id, public_url, thumbnail_url, titulo, descripcion, tipo, es_privado, storage_key, bucket')
 				.eq('user_id', id)
+				.neq('tipo', 'banner')
 				.order('orden', { ascending: true });
 
 			if (phErr) console.error('Error photos:', phErr);
 			photos = (phData || []).map(p => ({
 				...p,
-				tipo: /\.(mp4|webm|ogg)$/i.test(p.public_url) ? 'video' : 'image'
+				tipo: p.tipo === 'video' || /\.(mp4|webm|ogg|mov)$/i.test(p.public_url || '') ? 'video' : 'image',
+				url: p.public_url
 			}));
+
+			// Si es dueña/suscriptora, resolver URLs firmadas del contenido privado.
+			if (subscribed || isOwner) {
+				for (const p of photos) {
+					if (!p.url) {
+						try {
+							const res = await fetch('/api/media/presign', {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({ media_id: p.id })
+							});
+							const data = await res.json();
+							if (data.url) p.url = data.url;
+						} catch { /* sin URL */ }
+					}
+				}
+			}
 		} catch (err) {
 			console.error('Load error:', err);
 			error = err.message;
@@ -65,6 +103,11 @@
 	const showPaywall = () => {
 		alert('Este contenido está bloqueado. ¡Paga para desbloquear el álbum completo!');
 	};
+
+	function openPhotoModal(photo) {
+		if (!photo.url) return showPaywall();
+		selectedPhoto = photo;
+	}
 
 	function calcularEdad(fechaStr) {
 		if (!fechaStr) return '';
@@ -90,7 +133,7 @@
 			<!-- BANNER -->
 			<div class="w-full relative h-64">
 				{#if banners.length}
-					<img src={banners[currentBannerIndex].public_url} alt="Banner" vc
+					<img src={banners[currentBannerIndex].public_url} alt="Banner"
 					     class="absolute inset-0 h-full w-full object-cover transition-all duration-300" />
 
 					{#if banners.length > 1}
@@ -134,35 +177,34 @@
 				{/if}
 			</div>
 
-			{#if photos.length > 0}
-				<div class="mb-8">
-					<h2 class="mb-4 text-2xl font-bold">Álbum Exclusivo</h2>
+			<div class="mb-8">
+				<h2 class="mb-4 text-2xl font-bold">Álbum Exclusivo</h2>
+				{#if photos.length > 0}
 					<div class="grid grid-cols-2 gap-4 md:grid-cols-4">
 						{#each photos.slice(0, 4) as photo}
-							<div class="group relative cursor-pointer overflow-hidden rounded-lg" on:click={showPaywall}>
+							<div class="group relative cursor-pointer overflow-hidden rounded-lg" on:click={() => openPhotoModal(photo)}>
 								{#if photo.tipo === 'video'}
-									<video src={photo.public_url} muted loop autoplay class="h-48 w-full rounded-lg object-cover brightness-75"></video>
+									<video src={photo.url} muted loop autoplay class="h-48 w-full rounded-lg object-cover brightness-75"></video>
 								{:else}
-									<img src={photo.public_url} alt={photo.titulo} class="h-48 w-full rounded-lg object-cover brightness-75" />
+									<img src={photo.url || photo.thumbnail_url || '/aguaenlaboca.jpeg'} alt={photo.titulo} class="h-48 w-full rounded-lg object-cover brightness-75" />
 								{/if}
-								<div class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition group-hover:opacity-100">
-									<span class="text-3xl text-white">Locked</span>
-								</div>
+								{#if !subscribed && !isOwner}
+									<div class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition group-hover:opacity-100">
+										<span class="text-3xl text-white">Locked</span>
+									</div>
+								{/if}
 							</div>
 						{/each}
 					</div>
-					{#if photos.length > 4}
+					{#if !subscribed && !isOwner}
 						<p class="mt-4 text-center text-sm text-gray-600">
 							+{photos.length - 4} más... <strong class="text-green-600">Paga para desbloquear</strong>
 						</p>
 					{/if}
-				</div>
-			{:else}
-				<div class="mb-8">
-					<h2 class="mb-4 text-2xl font-bold">Álbum Exclusivo</h2>
+				{:else}
 					<p class="italic text-gray-500">Sin fotos aún.</p>
-				</div>
-			{/if}
+				{/if}
+			</div>
 
 		</div>
 	</div>
@@ -175,14 +217,11 @@
 			<button on:click={() => selectedPhoto = null} class="absolute -top-12 right-0 text-3xl text-white hover:text-gray-300">×</button>
 
 			{#if selectedPhoto.tipo === 'video'}
-				<video src={selectedPhoto.public_url} controls class="w-full rounded-lg max-h-[80vh]"></video>
+				<video src={selectedPhoto.url} controls class="w-full rounded-lg max-h-[80vh]"></video>
 			{:else}
 				<div class="group relative overflow-hidden rounded-lg">
-					<img src={selectedPhoto.public_url} alt={selectedPhoto.titulo}
+					<img src={selectedPhoto.url} alt={selectedPhoto.titulo}
 					     class="max-h-[80vh] w-full object-contain transition-transform duration-300 group-hover:scale-110" />
-					<div class="absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
-						<span class="text-6xl text-white">Magnifying Glass</span>
-					</div>
 				</div>
 			{/if}
 

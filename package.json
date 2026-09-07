@@ -24,6 +24,7 @@
 		"@tailwindcss/postcss": "^4.1.14",
 		"@tailwindcss/vite": "^4.1.13",
 		"@tsconfig/svelte": "^5.0.5",
+		"@types/node": "^26.1.2",
 		"autoprefixer": "^10.4.21",
 		"postcss": "^8.5.6",
 		"prettier": "^3.6.2",
@@ -38,6 +39,8 @@
 	},
 	"dependencies": {
 		"@aws-sdk/client-s3": "^3.972.0",
+		"@aws-sdk/s3-request-presigner": "^3.1102.0",
+		"@supabase/ssr": "^0.12.4",
 		"@supabase/supabase-js": "^2.75.0",
 		"face-api.js": "^0.22.2"
 	}

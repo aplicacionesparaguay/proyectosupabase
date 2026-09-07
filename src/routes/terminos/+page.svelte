@@ -6,11 +6,11 @@
 <main class="container">
 	<h1>Términos y Condiciones</h1>
 	<section>
-		TÉRMINOS DE USO DE KUÑA GUAPA (www.kunaguapa.com)
+		TÉRMINOS DE USO DE AGUA EN LA BOCA (www.aguaenlaboca.com)
 AL UTILIZAR NUESTRA PÁGINA WEB ACEPTAS ESTOS TÉRMINOS; LÉELOS DETENIDAMENTE.
 
 Introducción
-Estos Términos de Uso regulan tu acceso y uso de Kuña Guapa (en adelante “la Plataforma”), operada por [NOMBRE DE TU EMPRESA/RAZÓN SOCIAL], con domicilio en [DIRECCIÓN COMPLETA] y CUIT/NIT [NÚMERO].
+Estos Términos de Uso regulan tu acceso y uso de Agua En La Boca (en adelante “la Plataforma”), operada por [NOMBRE DE TU EMPRESA/RAZÓN SOCIAL], con domicilio en [DIRECCIÓN COMPLETA] y CUIT/NIT [NÚMERO].
 Claves principales:
 
 
@@ -32,9 +32,9 @@ Definiciones principales
 
 
 Quiénes somos y contacto
-Plataforma operada por [TU EMPRESA], domicilio [DIRECCIÓN], email: support@kunaguapa.com
+Plataforma operada por [TU EMPRESA], domicilio [DIRECCIÓN], email: support@aguaenlaboca.com
 Cambios en los Términos y en la Plataforma
-Podemos modificar los Términos o la Plataforma en cualquier momento. Te notificaremos cambios relevantes; si sigues usando Kuña Guapa tras la entrada en vigor, aceptas los nuevos términos.
+Podemos modificar los Términos o la Plataforma en cualquier momento. Te notificaremos cambios relevantes; si sigues usando Agua En La Boca tras la entrada en vigor, aceptas los nuevos términos.
 Registro
 
 
@@ -105,7 +105,7 @@ Podemos ceder este contrato; tú no.
 Estos Términos constituyen el acuerdo completo.
 
 Vigencia: [fecha de hoy].
-Preguntas → support@kunaguapa.com
+Preguntas → support@aguaenlaboca.com
 		<a href="/" class="back-link">Volver al inicio</a>
 	</section>
 </main>

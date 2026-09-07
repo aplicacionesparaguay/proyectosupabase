@@ -22,12 +22,14 @@
 		const ids = profiles.map(p => p.id);
 
 		const { data: banners } = await supabase
-			.from('user_banners')
+			.from('media')
 			.select('user_id, public_url, orden')
+			.eq('tipo', 'banner')
 			.in('user_id', ids)
 			.order('orden');
 
-		const bannersByUser = {};
+	/** @type {Record<string, string[]>} */
+	const bannersByUser = {};
 		for (const b of banners || []) {
 			if (!bannersByUser[b.user_id]) bannersByUser[b.user_id] = [];
 			bannersByUser[b.user_id].push(b.public_url);
@@ -49,7 +51,7 @@
 					currentIndex: 0
 				};
 			})
-			.filter(Boolean);
+			.filter(p => p !== null);
 
 		// Aleatorizar
 		for (let i = lista.length - 1; i > 0; i--) {
@@ -60,22 +62,26 @@
 		publicaciones = lista;
 	}
 
+	/** @param {{ banners: string[], currentIndex: number }} pub */
 	function prevBanner(pub) {
 		if (!pub.banners?.length) return;
 		pub.currentIndex = (pub.currentIndex - 1 + pub.banners.length) % pub.banners.length;
 		publicaciones = publicaciones;
 	}
 
+	/** @param {{ banners: string[], currentIndex: number }} pub */
 	function nextBanner(pub) {
 		if (!pub.banners?.length) return;
 		pub.currentIndex = (pub.currentIndex + 1) % pub.banners.length;
 		publicaciones = publicaciones;
 	}
 
+	/** @param {string} id */
 	function verPerfil(id) {
 		goto(`/perfil/${id}`);
 	}
 
+	/** @param {string} fechaStr */
 	function calcularEdad(fechaStr) {
 		if (!fechaStr) return '';
 		const nacimiento = new Date(fechaStr);

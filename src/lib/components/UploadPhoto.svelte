@@ -1,10 +1,13 @@
 <script>
   import { supabase } from '$lib/supabaseClient';
 
+  /** @type {string} */
   export let userId; // ID del usuario para nombrar la foto
+  /** @type {((url: string) => void) | undefined} */
   export let onUpload; // Callback después de subir
 
-  let files; // FileList vinculado al input
+  /** @type {FileList | null} */
+  let files = null; // FileList vinculado al input
   let uploading = false;
   let error = '';
 
@@ -19,36 +22,39 @@
     error = '';
 
     try {
-      const fileExt = file.name.split('.').pop();
-      const filePath = `${userId}/profile.${fileExt}`;
+      // 1) Pedir URL firmada de subida (bucket public)
+      const res = await fetch('/api/media/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tipo: 'avatar',
+          filename: file.name,
+          contentType: file.type,
+          es_privado: false
+        })
+      });
+      const req = await res.json();
+      if (!res.ok) throw new Error(req.error || 'Error generando subida');
 
-      // Subir al bucket 'profiles'
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('profiles')
-        .upload(filePath, file, { upsert: true });
-      if (uploadError) throw uploadError;
+      // 2) Subir directo a R2
+      const put = await fetch(req.upload_url, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file
+      });
+      if (!put.ok) throw new Error('Error subiendo archivo a R2');
 
-      // Obtener URL pública (manejar posibles nombres de campo según la versión del SDK)
-      const publicResponse = supabase.storage.from('profiles').getPublicUrl(filePath);
-      // getPublicUrl puede devolver { data: { publicUrl } } o { publicURL } según versión
-      const publicURL =
-        (publicResponse?.data && (publicResponse.data.publicUrl ?? publicResponse.data.publicURL)) ??
-        publicResponse?.publicURL ??
-        publicResponse?.publicUrl;
-
-      if (!publicURL) throw new Error('No se pudo obtener la URL pública del archivo');
-
-      // Actualizar la tabla users con la URL
+      // 3) Actualizar el avatar en profiles
       const { error: updateError } = await supabase
-        .from('users')
-        .update({ profile_pic: publicURL })
+        .from('profiles')
+        .update({ avatar_key: req.storage_key, avatar_url: req.public_url })
         .eq('id', userId);
 
       if (updateError) throw updateError;
 
-      if (onUpload) onUpload(publicURL);
+      if (onUpload) onUpload(req.public_url);
     } catch (e) {
-      error = e?.message ?? String(e);
+      error = e instanceof Error ? e.message : String(e);
       console.error('UploadPhoto error:', e);
     } finally {
       uploading = false;

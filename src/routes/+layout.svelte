@@ -200,10 +200,10 @@
 		<div class="flex h-1/3 md:h-auto flex-col items-center justify-center bg-gradient-to-br from-pink-800 to-purple-900 p-6 md:p-12">
 			<a href="/" class="group flex items-center space-x-4">
 				<div class="h-14 w-14 overflow-hidden rounded-full border-2 border-white/20 shadow-2xl ring-4 shadow-pink-600/40 ring-pink-500/60">
-					<img src="/kunaguapa.jpeg" alt="Kuña Guapa" class="h-full w-full object-cover transition duration-700 group-hover:scale-125" />
+					<img src="/aguaenlaboca.jpeg" alt="Agua En La Boca" class="h-full w-full object-cover transition duration-700 group-hover:scale-125" />
 				</div>
 				<span class="bg-gradient-to-r from-pink-400 via-purple-400 to-pink-300 bg-clip-text text-4xl font-black text-transparent">
-					Kuña Guapa
+					Agua En La Boca
 				</span>
 			</a>
 			<h2 class="mt-6 max-w-md text-center text-lg text-white/90">
@@ -258,7 +258,7 @@
 					<p class="mt-6 flex flex-col gap-2 text-center text-pink-900">
 						<a href="/recuperar" class="hover:underline">¿Has olvidado la contraseña?</a>
 						<button on:click={() => showRegister = true} class="font-bold text-pink-600 hover:underline">
-							Regístrate en Kuña Guapa
+							Regístrate en Agua En La Boca
 						</button>
 					</p>
 				{:else}
@@ -403,7 +403,7 @@
 					Solo para mayores de 18 años. Todo el contenido cumple con las leyes internacionales de consentimiento y protección.
 				</p>
 				<p class="mt-6 text-xs text-pink-500">
-					© {new Date().getFullYear()} Kuña Guapa. Todos los derechos reservados.
+					© {new Date().getFullYear()} Agua En La Boca. Todos los derechos reservados.
 				</p>
 			</div>
 		</div>

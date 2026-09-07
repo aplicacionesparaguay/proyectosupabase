@@ -51,14 +51,14 @@
       password = '';
       repeatPassword = '';
     } catch (e) {
-      error = e.message || 'Error al registrarse';
+      error = e instanceof Error ? e.message : 'Error al registrarse';
     }
   }
 </script>
 
 <div class="mx-auto mt-3 w-full max-w-md rounded-2xl bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 p-8 shadow-2xl border border-pink-200">
   <h2 class="mb-8 text-center text-3xl font-bold text-pink-900 drop-shadow-sm">
-    Únete a Kuña Guapa 💋
+    Únete a Agua En La Boca 💋
   </h2>
 
   {#if error}
