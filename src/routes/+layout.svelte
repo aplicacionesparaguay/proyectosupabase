@@ -57,10 +57,10 @@
 		<!-- Logo + Nombre -->
 		<a href="/" class="group flex items-center space-x-4">
 			<div class="h-14 w-14 rounded-full ring-4 ring-pink-500/60 shadow-2xl shadow-pink-600/40 overflow-hidden border-2 border-white/20">
-				<img src="/kunaguapa.jpeg" alt="Kuña Guapa" class="h-full w-full object-cover group-hover:scale-125 transition duration-700" />
+				<img src="/agua-en-la-boca.jpeg" alt="Agua en la Boca" class="h-full w-full object-cover group-hover:scale-125 transition duration-700" />
 			</div>
 			<span class="text-4xl font-black bg-gradient-to-r from-pink-400 via-purple-400 to-pink-300 bg-clip-text text-transparent drop-shadow-2xl">
-				Kuña Guapa
+Agua en la Boca
 			</span>
 		</a>
 
@@ -150,7 +150,7 @@
 					consentimiento y protección.
 				</p>
 				<p class="mt-6 text-xs text-pink-500">
-					© {new Date().getFullYear()} Kuña Guapa. Todos los derechos reservados.
+					© {new Date().getFullYear()} Agua en la Boca. Todos los derechos reservados.
 				</p>
 			</div>
 		</div>

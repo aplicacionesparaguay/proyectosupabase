@@ -58,7 +58,7 @@
 
 <div class="mx-auto mt-32 w-full max-w-md rounded-2xl bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 p-8 shadow-2xl border border-pink-200">
   <h2 class="mb-8 text-center text-3xl font-bold text-pink-900 drop-shadow-sm">
-    Únete a Kuña Guapa 💋
+    Únete a Agua en la Boca 💋
   </h2>
 
   {#if error}

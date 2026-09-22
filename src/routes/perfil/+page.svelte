@@ -48,8 +48,9 @@
 	let bannerUrl = '';
 
 	// --- Nuevas variables para vista previa y censura ---
-	let preview = null; // { type: 'image'|'video', file, url, detections:[], censoredDataUrl?:string, filename }
+	let preview = null; // { type: 'image'|'video', file, url, detections:[], censoredDataUrl?:string, filename, uploadTarget }
 	let isUploadingPreview = false;
+	let uploadProgress = 0;
 	let censorFaces = true; // default when user chooses to censor in preview
 
 	// cerrar menú si click fuera
@@ -185,10 +186,13 @@
 	}
 
 	async function uploadBanner() {
-		// usa la misma lógica de subir archivo abajo pero para banners
+		// usa la misma lógica de preview con censura facial que el álbum
 		openFileDialog(async (file) => {
-			const { path, url } = await uploadToStorage(file, 'banners');
-			await uploadBannerFile(path, url);
+			if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+				alert('Solo se permiten imágenes o videos.');
+				return;
+			}
+			await preparePreviewFromFile(file, 'banner');
 		}, 'image/*,video/*');
 	}
 
@@ -201,7 +205,24 @@
 			.eq('public_url', currentUrl)
 			.single();
 		if (error) return console.error(error);
-		await supabase.storage.from('banners').remove([data.storage_path]);
+
+		// Eliminar de R2
+		if (data.storage_path) {
+			const deleteResponse = await fetch('/api/upload/r2', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					fileName: data.storage_path,
+					contentType: 'application/octet-stream',
+					folder: 'banners',
+					action: 'delete',
+				}),
+			});
+			if (!deleteResponse.ok) {
+				console.warn('Error eliminando de R2, continuando con DB');
+			}
+		}
+
 		await supabase.from('user_banners').delete().eq('id', data.id);
 		await loadBannerPhotos();
 		currentBannerIndex = Math.min(currentBannerIndex, bannerPhotos.length - 1);
@@ -236,7 +257,24 @@
 	async function deletePhoto(photoId) {
 		const photo = photos.find((p) => p.id === photoId);
 		if (!photo || !$session?.user) return;
-		await supabase.storage.from('user-photos').remove([photo.storage_path]);
+
+		// Eliminar de R2
+		if (photo.storage_path) {
+			const deleteResponse = await fetch('/api/upload/r2', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					fileName: photo.storage_path,
+					contentType: 'application/octet-stream',
+					folder: 'gallery',
+					action: 'delete',
+				}),
+			});
+			if (!deleteResponse.ok) {
+				console.warn('Error eliminando de R2, continuando con DB');
+			}
+		}
+
 		await supabase.from('user_photos').delete().eq('id', photoId);
 		if (selectedPhoto?.id === photoId) selectedPhoto = null;
 		await loadPhotos();
@@ -290,7 +328,51 @@
 		fileInput.click();
 	}
 
-	// sube un File a storage en bucket dado; retorna { path, url }
+	// Sube archivo a R2 usando URL prefirmada del backend
+	async function uploadToR2(file, folder = 'gallery') {
+		const response = await fetch('/api/upload/r2', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				fileName: file.name,
+				contentType: file.type,
+				folder,
+			}),
+		});
+
+		const result = await response.json();
+		if (!response.ok) throw new Error(result.error || 'Error obteniendo URL de subida');
+
+		const { signedUrl, key } = result;
+
+		return new Promise((resolve, reject) => {
+			const xhr = new XMLHttpRequest();
+
+			xhr.upload.addEventListener('progress', (e) => {
+				if (e.lengthComputable) {
+					uploadProgress = Math.round((e.loaded / e.total) * 100);
+				}
+			});
+
+			xhr.addEventListener('load', () => {
+				if (xhr.status >= 200 && xhr.status < 300) {
+					const publicUrl = `${import.meta.env.VITE_R2_PUBLIC_URL}/${key}`;
+					resolve({ publicUrl, key });
+				} else {
+					reject(new Error(`Error subiendo a R2: ${xhr.status} ${xhr.statusText}`));
+				}
+			});
+
+			xhr.addEventListener('error', () => reject(new Error('Error de red subiendo a R2')));
+			xhr.addEventListener('abort', () => reject(new Error('Subida cancelada')));
+
+			xhr.open('PUT', signedUrl);
+			xhr.setRequestHeader('Content-Type', file.type);
+			xhr.send(file);
+		});
+	}
+
+	// sube un File a storage en bucket dado; retorna { path, url } - MANTENIDO POR COMPATIBILIDAD
 	async function uploadToStorage(file, bucket) {
 		const filename = `${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
 		const path = `${$session.user.id}/${filename}`;
@@ -303,7 +385,8 @@
 	}
 
 	// --- CREAR PREVIEW antes de subir (imagen o video) ---
-	async function preparePreviewFromFile(file) {
+	// uploadTarget: 'album' | 'banner'
+	async function preparePreviewFromFile(file, uploadTarget = 'album') {
 		preview = null;
 		const type = file.type.startsWith('video/') ? 'video' : 'image';
 		const url = URL.createObjectURL(file);
@@ -317,7 +400,7 @@
 			if (detections && detections.length && censorFaces) {
 				censoredDataUrl = pixelateImageElement(img, detections, 12); // pixel size 12
 			}
-			preview = { type, file, url, detections, censoredDataUrl, filename };
+			preview = { type, file, url, detections, censoredDataUrl, filename, uploadTarget };
 		} else {
 			// video: capture first frame and detect faces there
 			const frameCanvas = await captureVideoFirstFrame(url);
@@ -334,7 +417,8 @@
 				detections,
 				censoredDataUrl,
 				filename,
-				thumbnailCanvas: frameCanvas
+				thumbnailCanvas: frameCanvas,
+				uploadTarget
 			};
 		}
 	}
@@ -353,80 +437,89 @@
 		}, 'image/*,video/*');
 	}
 
-	// subir la preview (si es image: sube la version censurada si existe y se solicitó; si video: sube video original y opcionalmente thumbnail censurado)
+	// subir la preview a R2 (imagen o video) con censura facial opcional
+	// uploadTarget: 'album' | 'banner'
 	async function uploadPreview(confirmCensor = false) {
 		if (!preview || !$session?.user) return;
 		isUploadingPreview = true;
 		try {
+			const target = preview.uploadTarget || 'album';
+			const folder = target === 'banner' ? 'banners' : 'gallery';
+
 			if (preview.type === 'image') {
-				if (confirmCensor && preview.censoredDataUrl) {
-					// convertir dataURL a Blob
-					const blob = dataURLtoBlob(preview.censoredDataUrl);
-					const { path, url } = await uploadToStorage(
-						new File([blob], preview.filename, { type: 'image/png' }),
-						'user-photos'
-					);
-					// insertar en tabla
-					await supabase.from('user_photos').insert({
+				const fileToUpload = (confirmCensor && preview.censoredDataUrl)
+					? new File([dataURLtoBlob(preview.censoredDataUrl)], preview.filename, { type: 'image/png' })
+					: preview.file;
+
+				const { publicUrl, key } = await uploadToR2(fileToUpload, folder);
+
+				if (target === 'banner') {
+					// Guardar en user_banners
+					await supabase.from('user_banners').insert({
 						user_id: $session.user.id,
-						storage_path: path,
-						public_url: url,
-						filename: preview.filename,
-						orden: photos.length,
-						titulo: '',
-						descripcion: ''
+						storage_path: key,
+						public_url: publicUrl,
+						orden: bannerPhotos.length
 					});
+					await loadBannerPhotos();
+					currentBannerIndex = bannerPhotos.length - 1;
 				} else {
-					// subir original
-					const { path, url } = await uploadToStorage(preview.file, 'user-photos');
+					// Guardar en user_photos (álbum)
 					await supabase.from('user_photos').insert({
 						user_id: $session.user.id,
-						storage_path: path,
-						public_url: url,
-						filename: preview.filename,
-						orden: photos.length,
-						titulo: '',
-						descripcion: ''
-					});
-				}
-			} else {
-				// video: subir video original
-				const { path, url } = await uploadToStorage(preview.file, 'user-photos');
-				// si tenemos thumbnail censurado y queremos subirlo como imagen de portada, subirlo también
-				if (confirmCensor && preview.censoredDataUrl) {
-					const blob = dataURLtoBlob(preview.censoredDataUrl);
-					const thumbName = `thumb-${preview.filename}.png`;
-					const { path: tpath, url: turl } = await uploadToStorage(
-						new File([blob], thumbName, { type: 'image/png' }),
-						'user-photos'
-					);
-					// Insert metadata with both video public_url and thumbnail (guardar thumbnail en descripcion o campo extra)
-					await supabase.from('user_photos').insert({
-						user_id: $session.user.id,
-						storage_path: path,
-						public_url: url,
+						storage_path: key,
+						public_url: publicUrl,
 						filename: preview.filename,
 						orden: photos.length,
 						titulo: '',
 						descripcion: '',
-						thumbnail_url: turl
+						mime_type: fileToUpload.type
 					});
+					await loadPhotos();
+				}
+			} else {
+				// video: subir video original a R2
+				const { publicUrl: videoUrl, key: videoKey } = await uploadToR2(preview.file, folder);
+
+				let thumbnailUrl = null;
+				if (confirmCensor && preview.censoredDataUrl) {
+					// Subir thumbnail censurado a R2
+					const blob = dataURLtoBlob(preview.censoredDataUrl);
+					const thumbName = `thumb-${preview.filename}.png`;
+					const { publicUrl: thumbUrl } = await uploadToR2(
+						new File([blob], thumbName, { type: 'image/png' }),
+						folder
+					);
+					thumbnailUrl = thumbUrl;
+				}
+
+				if (target === 'banner') {
+					await supabase.from('user_banners').insert({
+						user_id: $session.user.id,
+						storage_path: videoKey,
+						public_url: videoUrl,
+						orden: bannerPhotos.length
+					});
+					await loadBannerPhotos();
+					currentBannerIndex = bannerPhotos.length - 1;
 				} else {
 					await supabase.from('user_photos').insert({
 						user_id: $session.user.id,
-						storage_path: path,
-						public_url: url,
+						storage_path: videoKey,
+						public_url: videoUrl,
 						filename: preview.filename,
 						orden: photos.length,
 						titulo: '',
-						descripcion: ''
+						descripcion: '',
+						thumbnail_url: thumbnailUrl,
+						mime_type: preview.file.type
 					});
+					await loadPhotos();
 				}
 			}
 
 			// limpiar preview y recargar
 			preview = null;
-			await loadPhotos();
 		} catch (e) {
 			console.error('Error uploading preview:', e);
 			alert('Error al subir el archivo.');
@@ -583,19 +676,41 @@
 		return new Blob([u8arr], { type: mime });
 	}
 
-	// Upload directo (sin preview) - lo dejo por compatibilidad si lo necesitas
-	async function uploadFileDirect(bucket) {
+	// Upload directo a R2 (sin preview, pero con censura facial automática si hay caras)
+	async function uploadFileDirect() {
 		openFileDialog(async (file) => {
 			if (!file) return;
-			const { path, url } = await uploadToStorage(file, bucket);
+			if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+				alert('Solo se permiten imágenes o videos.');
+				return;
+			}
+
+			// Detectar caras y censurar si es imagen
+			let fileToUpload = file;
+			if (file.type.startsWith('image/')) {
+				const url = URL.createObjectURL(file);
+				const img = await loadImage(url);
+				const detections = await detectFacesImageElement(img);
+				if (detections && detections.length) {
+					const censoredDataUrl = pixelateImageElement(img, detections, 12);
+					const blob = dataURLtoBlob(censoredDataUrl);
+					fileToUpload = new File([blob], file.name, { type: 'image/png' });
+				}
+				URL.revokeObjectURL(url);
+			}
+
+			// Subir a R2
+			const { publicUrl, key } = await uploadToR2(fileToUpload, 'gallery');
+
 			await supabase.from('user_photos').insert({
 				user_id: $session.user.id,
-				storage_path: path,
-				public_url: url,
+				storage_path: key,
+				public_url: publicUrl,
 				filename: file.name,
 				orden: photos.length,
 				titulo: '',
-				descripcion: ''
+				descripcion: '',
+				mime_type: fileToUpload.type
 			});
 			await loadPhotos();
 		}, 'image/*,video/*');
@@ -750,16 +865,28 @@
 					>Agregar Foto/Video</button
 				>
 				<button
-					on:click={() => uploadFileDirect('user-photos')}
+					on:click={uploadFileDirect}
 					class="rounded-lg bg-gray-200 px-4 py-2 hover:bg-gray-300"
-					>Subir directo (sin preview)</button
+					>Subir directo (censura automática)</button
 				>
 			</div>
 
 			<!-- PREVIEW antes de subir -->
 			{#if preview}
 				<div class="mb-6 rounded-lg border bg-gray-50 p-4">
-					<h3 class="mb-2 font-semibold">Vista previa — {preview.filename}</h3>
+					<h3 class="mb-2 font-semibold">Vista previa — {preview.filename} {preview.uploadTarget === 'banner' ? '(Banner)' : '(Álbum)'}</h3>
+
+					{#if isUploadingPreview && uploadProgress > 0}
+						<div class="mb-4">
+							<div class="flex justify-between text-sm mb-1">
+								<span>Subiendo a R2...</span>
+								<span>{uploadProgress}%</span>
+							</div>
+							<div class="w-full bg-gray-200 rounded-full h-2">
+								<div class="bg-green-500 h-2 rounded-full transition-all" style="width: {uploadProgress}%"></div>
+							</div>
+						</div>
+					{/if}
 
 					{#if preview.type === 'image'}
 						<div class="flex items-start gap-4">

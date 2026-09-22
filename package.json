@@ -37,7 +37,10 @@
 		"vite": "^7.1.7"
 	},
 	"dependencies": {
-		"@supabase/supabase-js": "^2.75.0",
+		"@aws-sdk/client-s3": "^3.1127.0",
+		"@aws-sdk/s3-request-presigner": "^3.1127.0",
+		"@supabase/ssr": "^0.12.6",
+		"@supabase/supabase-js": "^2.115.0",
 		"face-api.js": "^0.22.2"
 	}
 }

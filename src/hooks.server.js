@@ -4,6 +4,7 @@ import { redirect } from '@sveltejs/kit';
 export const handle = async ({ event, resolve }) => {
 	const { data: { session } } = await supabase.auth.getSession();
 	event.locals.session = session;
+	event.locals.getSession = async () => session;
 
 	// Si está logeado y va a login/register, redirige
 	const protectedPaths = ['/login', '/register'];
