@@ -15,6 +15,13 @@ export const handle = async ({ event, resolve }) => {
 		event.locals.user = user;
 	}
 
+	// La sesión se resuelve acá en el servidor y viaja al cliente vía +layout.server.js,
+	// para que la UI no dependa de un fetch posterior en onMount.
+	const {
+		data: { session },
+	} = await event.locals.supabase.auth.getSession();
+	event.locals.session = session;
+
 	const pathname = event.url.pathname;
 
 	// Usuario logueado no necesita ver login/register

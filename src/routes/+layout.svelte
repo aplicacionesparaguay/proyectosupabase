@@ -1,7 +1,7 @@
 <script lang="ts">
-	import '..//app.css';
+	import '../app.css';
 	import { goto } from '$app/navigation';
-	import { user } from '$lib/stores/auth';
+	import { user, session } from '$lib/stores/auth';
 	import { supabase } from '$lib/supabaseClient';
 	import { onMount, onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
@@ -26,22 +26,21 @@
 	let menuRef: HTMLDivElement;
 
 	// Variable para almacenar el listener
-	let authListener: { data: { subscription: { unsubscribe: () => void } } } | null = null;
+	let authListener: { unsubscribe: () => void } | null = null;
 
-	onMount(async () => {
-		// Obtener sesión actual
-		const { data } = await supabase.auth.getSession();
-		if (data.session) {
-			user.set(data.session.user);
-		}
+	/** @type {{ session: import('@supabase/supabase-js').Session | null, user: import('@supabase/supabase-js').User | null }} */
+	export let data;
 
-		// Listener para cambios en autenticación
-		authListener = supabase.auth.onAuthStateChange((event, session) => {
-			if (session?.user) {
-				user.set(session.user);
-			} else {
-				user.set(null);
-			}
+	// El servidor es la fuente de verdad: en cada navegacion +layout.server.js
+	// vuelve a resolver la sesion desde la cookie y rehidrata los stores.
+	$: session.set(data.session);
+	$: user.set(data.user);
+
+	onMount(() => {
+		// La sesion inicial ya llego por `data`; este es el unico listener de auth.
+		authListener = supabase.auth.onAuthStateChange((event, currentSession) => {
+			session.set(currentSession);
+			user.set(currentSession?.user ?? null);
 		});
 
 		// Cerrar menú al hacer clic fuera (solo en el navegador)
@@ -52,9 +51,7 @@
 
 	onDestroy(() => {
 		// Limpiar listener al destruir componente
-		if (authListener) {
-			authListener.data.subscription.unsubscribe();
-		}
+		authListener?.unsubscribe();
 		
 		// Remover event listener solo en el navegador
 		if (browser) {
