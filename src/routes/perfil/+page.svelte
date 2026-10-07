@@ -1,593 +1,996 @@
-<!-- Panel de control para subir fotos las chicas -->
 <script>
-	// @ts-nocheck
 	import { onMount, onDestroy } from 'svelte';
+	import { browser } from '$app/environment';
 	import { supabase } from '$lib/supabaseClient';
-	import { session, logout } from '$lib/stores/auth';
+	import { session, user, logout } from '$lib/stores/auth';
 	import * as faceapi from 'face-api.js';
+	import {
+		uploadToR2,
+		deleteR2Object,
+		validateImageFile,
+		MAX_UPLOAD_BYTES,
+		R2_FOLDERS
+	} from '$lib/upload/r2Upload';
 
-	// === Estado del banner ===
+	/**
+	 * Bounding box de una detección de face-api.js. El código solo usa estas
+	 * cuatro propiedades (detectFaces*, pixelateRect).
+	 * @typedef {Object} FaceBox
+	 * @property {number} x
+	 * @property {number} y
+	 * @property {number} width
+	 * @property {number} height
+	 */
+
+	/**
+	 * Vista previa previa a la subida, con las propiedades que ya usaba el
+	 * código original.
+	 * @typedef {Object} Preview
+	 * @property {'image' | 'video'} type
+	 * @property {File} file
+	 * @property {string} url
+	 * @property {FaceBox[]} detections
+	 * @property {string} filename
+	 * @property {'album' | 'banner'} uploadTarget
+	 * @property {string | null} [censoredDataUrl]
+	 * @property {HTMLCanvasElement} [thumbnailCanvas]
+	 */
+
+	/**
+	 * Fila de `user_photos` tal como la devuelve el select de loadPhotos().
+	 * @typedef {Object} Foto
+	 * @property {string} id
+	 * @property {string} public_url
+	 * @property {string | null} [thumbnail_url]
+	 * @property {string | null} [titulo]
+	 * @property {string | null} [descripcion]
+	 * @property {string | null} [storage_path]
+	 * @property {string | null} [filename]
+	 * @property {string | null} [mime_type]
+	 * @property {Comentario[]} [photo_comments]
+	 */
+
+	/**
+	 * Comentario de `photo_comments`, con el join anidado `profiles` que usa el
+	 * template.
+	 * @typedef {Object} Comentario
+	 * @property {string} [id]
+	 * @property {string} comentario
+	 * @property {{ nombre?: string | null } | null} [profiles]
+	 */
+
+	onMount(async () => {
+		console.log('🧠 Cargando modelos de face-api.js...');
+
+		try {
+			// Cargar todos los modelos necesarios desde /models
+			await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+			await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+			await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+			await faceapi.nets.ssdMobilenetv1.loadFromUri('/models'); // opcional, si usas detección más precisa
+
+			console.log('✅ Modelos cargados correctamente.');
+		} catch (err) {
+			console.warn('⚠️ No se pudieron cargar modelos face-api.js:', err);
+		}
+	});
+
+	// --- Estado del perfil (mantuve tus variables) ---
+	/** @type {string[]} */
 	let bannerPhotos = [];
 	let currentBannerIndex = 0;
-	let selectedBanner = null; // para fullscreen
 
-	// === Estado del perfil ===
-	let foto = '', nombre = '', email = '', bio = '', fecha_nacimiento = '',
-		ciudad = '', pais = '', whatsapp = '', twitter_url = '',
-		instagram_url = '', website_url = '', direccion = '';
+	let foto = '';
+	// Clave R2 del avatar actual, necesaria para poder borrarlo al reemplazarlo.
+	let previousAvatarKey = '';
+	let nombre = '';
+	let email = '';
+	let bio = '';
 
 	let editing = false;
 	let saving = false;
 
-	// === Álbum ===
+	// --- Avatar ---
+	let avatarUploading = false;
+	let avatarError = '';
+
+	/** @type {Foto[]} */
 	let photos = [];
+	/** @type {Foto | null} */
 	let selectedPhoto = null;
 	let photoComment = '';
+	/** @type {Comentario[]} */
 	let photoComments = [];
 
-	// === Menú banner ===
 	let showMenu = false;
-	let menuRef;
-	let buttonRef;
+	/** @type {HTMLElement | null} */
+	let menuRef = null;
+	/** @type {HTMLElement | null} */
+	let buttonRef = null;
+	let bannerUrl = '';
 
-	// === Preview + censura ===
-	let preview = null;
+	// --- Nuevas variables para vista previa y censura ---
+	/** @type {Preview | null} */
+	let preview = null; // { type: 'image'|'video', file, url, detections:[], censoredDataUrl?:string, filename, uploadTarget }
 	let isUploadingPreview = false;
-	let censorFaces = true;
+	let uploadProgress = 0;
+	let censorFaces = true; // default when user chooses to censor in preview
 
-	// Click fuera del menú
+	// cerrar menú si click fuera
+	/**
+	 * @param {MouseEvent} event
+	 */
 	function handleClickOutside(event) {
-		if (showMenu && menuRef && !menuRef.contains(event.target) && buttonRef && !buttonRef.contains(event.target)) {
+		const target = /** @type {Node | null} */ (event.target);
+		if (showMenu && menuRef && !menuRef.contains(target) && !buttonRef?.contains(target)) {
 			showMenu = false;
 		}
 	}
 
-	// Sincronizar desde sesión
-	$: if ($session?.user) {
-		nombre = $session.user.user_metadata?.nombre || $session.user.email?.split('@')[0] || 'Usuario';
-		email = $session.user.email || '';
-	}
-
-	// === onMount ÚNICO ===
 	onMount(async () => {
 		document.addEventListener('click', handleClickOutside);
 
-		// Cargar face-api
+		// Cargar modelos face-api (espera que los pongas en /static/models)
 		try {
-			await Promise.all([
-				faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
-				faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
-				faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
-				faceapi.nets.ssdMobilenetv1.loadFromUri('/models')
-			]);
-			console.log('Modelos face-api cargados (4/4)');
+			await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+			await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+			await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+			// tinyFaceDetector es suficiente para bounding boxes rápidos
 		} catch (e) {
-			console.warn('Error face-api:', e);
+			console.warn(
+				'No se pudieron cargar modelos face-api.js, detección deshabilitada si falla.',
+				e
+			);
 		}
 
+		// cargar perfil + contenido si hay sesión
 		if ($session?.user) {
-			await Promise.all([loadProfile(), loadPhotos(), loadBannerPhotos()]);
+			await loadProfile();
+			await loadPhotos();
+			await loadBannerPhotos();
 		}
 	});
 
+	// onDestroy también se ejecuta durante el render en servidor, donde `document`
+	// no existe. Sin este guard la ruta /perfil devolvía 500 en SSR.
 	onDestroy(() => {
-		document.removeEventListener('click', handleClickOutside);
+		if (browser) {
+			document.removeEventListener('click', handleClickOutside);
+		}
 	});
 
-	// === CARGAR PERFIL ===
+	// sincronizar sesión a variables
+	$: if ($session?.user) {
+		nombre = $session.user.user_metadata?.nombre || $session.user.email || 'Usuario';
+		email = $session.user.email || '';
+	}
+
+	// ------------------ FUNCIONES DE PERFIL / BANNERS / ALBUM (mantener lógicas) ------------------
+
 	async function loadProfile() {
 		if (!$session?.user) return;
-		const { data } = await supabase
+
+		const { data, error } = await supabase
 			.from('profiles')
-			.select('*')
+			.select(
+				`
+                        id,
+                        role,
+                        username,
+                        display_name,
+                        bio,
+                        avatar_key,
+                        banner_key,
+                        subscription_price,
+                        is_verified,
+                        is_banned,
+                        created_at,
+                        updated_at
+                `
+			)
 			.eq('id', $session.user.id)
 			.maybeSingle();
 
+		if (error && error.code !== 'PGRST116') {
+			console.error('Error loading profile:', error);
+			return;
+		}
+
 		if (data) {
-			nombre = data.nombre || nombre;
-			email = data.email || email;
+			nombre =
+				data.display_name ||
+				data.username ||
+				$session.user.user_metadata?.nombre ||
+				$session.user.email?.split('@')[0] ||
+				'Usuario';
+
+			email = $session.user.email || '';
 			bio = data.bio || '';
-			foto = data.avatar_url || '';
-			fecha_nacimiento = data.fecha_nacimiento || '';
-			ciudad = data.ciudad || '';
-			pais = data.pais || '';
-			whatsapp = data.whatsapp || '';
-			twitter_url = data.twitter_url || '';
-			instagram_url = data.instagram_url || '';
-			website_url = data.website_url || '';
-			direccion = data.direccion || '';
+			foto = data.avatar_key || '';
+		} else {
+			nombre =
+				$session.user.user_metadata?.nombre || $session.user.email?.split('@')[0] || 'Usuario';
+
+			email = $session.user.email || '';
+			bio = '';
+			foto = '';
 		}
 	}
 
-	// === GUARDAR PERFIL ===
 	async function saveProfile() {
 		if (!$session?.user) return;
+
 		saving = true;
+
 		try {
-			await supabase.from('profiles').upsert({
+			const { error } = await supabase.from('profiles').upsert({
 				id: $session.user.id,
-				nombre, email, bio, avatar_url: foto,
-				fecha_nacimiento, ciudad, pais, whatsapp,
-				twitter_url, instagram_url, website_url, direccion
+				display_name: nombre || null,
+				bio: bio || '',
+				avatar_key: foto || null
 			});
-			await supabase.auth.updateUser({ data: { nombre } });
-			editing = false;
+
+			if (error) {
+				console.error('Error saving profile:', error);
+				return;
+			}
+
+			// El email pertenece a Supabase Auth, no a profiles.
+			// Guardamos únicamente los datos que corresponden a profiles.
+			await supabase.auth.updateUser({
+				data: {
+					nombre: nombre || null,
+					bio: bio || ''
+				}
+			});
+
+			await loadProfile();
 		} catch (e) {
-			alert('Error al guardar');
+			console.error('Error saving profile:', e);
 		} finally {
 			saving = false;
+			editing = false;
 		}
 	}
 
-	// === HELPERS R2 (subida firmada) ===
-	async function requestUpload({ tipo, filename, contentType, es_privado }) {
-		const res = await fetch('/api/media/upload', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ tipo, filename, contentType, es_privado })
-		});
-		const data = await res.json();
-		if (!res.ok) throw new Error(data.error || 'Error generando subida');
-		return data;
-	}
-
-	async function uploadBlobToR2(uploadUrl, blob, contentType) {
-		const res = await fetch(uploadUrl, {
-			method: 'PUT',
-			headers: { 'Content-Type': contentType },
-			body: blob
-		});
-		if (!res.ok) throw new Error('Error subiendo archivo a R2');
-	}
-
-	async function insertMedia(row) {
-		const { error } = await supabase.from('media').insert(row);
-		if (error) throw error;
-	}
-
-	// === BANNERS ===
 	async function loadBannerPhotos() {
 		if (!$session?.user) return;
-		const { data } = await supabase
-			.from('media')
-			.select('id, storage_key, public_url, tipo, es_privado, orden')
+		const { data, error } = await supabase
+			.from('user_banners')
+			.select('*')
 			.eq('user_id', $session.user.id)
-			.eq('tipo', 'banner')
-			.order('orden');
-		bannerPhotos = data || [];
+			.order('orden', { ascending: true });
+		if (error) return console.error('Error loading banners:', error);
+		bannerPhotos = (data || []).map((b) => b.public_url).filter(Boolean);
+	}
+
+	/**
+	 * @param {string} path
+	 * @param {string} url
+	 */
+	async function uploadBannerFile(path, url) {
+		if (!$session?.user) return;
+		// Inserta metadato en user_banners
+		const { error } = await supabase.from('user_banners').insert({
+			user_id: $session.user.id,
+			storage_path: path,
+			public_url: url,
+			orden: bannerPhotos.length
+		});
+		if (error) console.error('Error inserting banner:', error);
+		await loadBannerPhotos();
+		currentBannerIndex = bannerPhotos.length - 1;
 	}
 
 	async function uploadBanner() {
+		// usa la misma lógica de preview con censura facial que el álbum
 		openFileDialog(async (file) => {
-			try {
-				const req = await requestUpload({ tipo: 'banner', filename: file.name, contentType: file.type, es_privado: false });
-				await uploadBlobToR2(req.upload_url, file, file.type);
-				await insertMedia({
-					user_id: $session.user.id,
-					tipo: 'banner',
-					bucket: req.bucket,
-					storage_key: req.storage_key,
-					public_url: req.public_url,
-					es_privado: false,
-					orden: bannerPhotos.length
-				});
-				await loadBannerPhotos();
-			} catch (e) {
-				alert('Error al subir banner: ' + (e?.message ?? e));
+			const problem = validateImageFile(file);
+			if (problem) {
+				alert(problem);
+				return;
 			}
-		}, 'image/*,video/*');
+			await preparePreviewFromFile(file, 'banner');
+		}, 'image/*');
 	}
 
 	async function deleteCurrentBanner() {
-		const banner = bannerPhotos[currentBannerIndex];
-		if (!banner) return;
-		if (!confirm('¿Borrar este banner?')) return;
-		const res = await fetch('/api/media/delete', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ media_id: banner.id })
-		});
-		const data = await res.json();
-		if (!data.ok) alert(data.error || 'Error al borrar');
+		if (!$session?.user || bannerPhotos.length === 0) return;
+		const currentUrl = bannerPhotos[currentBannerIndex];
+		const { data, error } = await supabase
+			.from('user_banners')
+			.select('storage_path,id')
+			.eq('public_url', currentUrl)
+			.single();
+		if (error) return console.error(error);
+
+		// Eliminar de R2. Antes se enviaba la clave en `fileName` y el endpoint
+		// exigia `key`, asi que el borrado siempre fallaba con 400.
+		if (data.storage_path) {
+			const deleted = await deleteR2Object(data.storage_path, R2_FOLDERS.cover);
+			if (!deleted) console.warn('Error eliminando de R2, continuando con DB');
+		}
+
+		await supabase.from('user_banners').delete().eq('id', data.id);
 		await loadBannerPhotos();
-		currentBannerIndex = Math.min(currentBannerIndex, Math.max(0, bannerPhotos.length - 1));
+		currentBannerIndex = Math.min(currentBannerIndex, bannerPhotos.length - 1);
 	}
 
-	const prevBanner = () => currentBannerIndex = (currentBannerIndex - 1 + bannerPhotos.length) % bannerPhotos.length;
-	const nextBanner = () => currentBannerIndex = (currentBannerIndex + 1) % bannerPhotos.length;
+	function verBanner() {
+		if (bannerPhotos[currentBannerIndex]) window.open(bannerPhotos[currentBannerIndex], '_blank');
+		else alert('No hay imagen disponible.');
+	}
 
-	// === ÁLBUM ===
+	const prevBanner = () => {
+		if (bannerPhotos.length)
+			currentBannerIndex = (currentBannerIndex - 1 + bannerPhotos.length) % bannerPhotos.length;
+	};
+	const nextBanner = () => {
+		if (bannerPhotos.length) currentBannerIndex = (currentBannerIndex + 1) % bannerPhotos.length;
+	};
+
+	// ------------------ ALBUM: fotos y videos ------------------
+
 	async function loadPhotos() {
 		if (!$session?.user) return;
-		const { data } = await supabase
-			.from('media')
-			.select('id, tipo, storage_key, public_url, thumbnail_url, titulo, descripcion, orden, es_privado, bucket')
+		const { data, error } = await supabase
+			.from('user_photos')
+			.select('*')
 			.eq('user_id', $session.user.id)
-			.neq('tipo', 'banner')
-			.order('orden');
-		photos = (data || []).map(p => ({ ...p, filename: p.storage_key.split('/').pop() }));
+			.order('orden', { ascending: true });
+		if (error) console.error('Error loading photos:', error);
+		photos = data || [];
 	}
 
-	// === UPLOAD HELPERS ===
+	/**
+	 * @param {string} photoId
+	 */
+	async function deletePhoto(photoId) {
+		const photo = photos.find((p) => p.id === photoId);
+		if (!photo || !$session?.user) return;
+
+		// Eliminar de R2
+		if (photo.storage_path) {
+			const deleted = await deleteR2Object(photo.storage_path, R2_FOLDERS.post);
+			if (!deleted) console.warn('Error eliminando de R2, continuando con DB');
+		}
+
+		await supabase.from('user_photos').delete().eq('id', photoId);
+		if (selectedPhoto?.id === photoId) selectedPhoto = null;
+		await loadPhotos();
+	}
+
+	/**
+	 * @param {Foto} photo
+	 */
+	function openPhotoModal(photo) {
+		selectedPhoto = photo;
+		photoComment = '';
+		photoComments = photo.photo_comments || [];
+	}
+
+	async function addPhotoComment() {
+		if (!selectedPhoto || !photoComment.trim() || !$session?.user) return;
+		const { error } = await supabase
+			.from('photo_comments')
+			.insert({ photo_id: selectedPhoto.id, user_id: $session.user.id, comentario: photoComment });
+		if (!error) {
+			photoComment = '';
+			await loadPhotos();
+			const { data } = await supabase
+				.from('user_photos')
+				.select('*')
+				.eq('id', selectedPhoto.id)
+				.single();
+			photoComments = data?.photo_comments || [];
+		}
+	}
+
+	/**
+	 * @param {string} photoId
+	 * @param {Partial<Pick<Foto, 'titulo' | 'descripcion'>>} updates
+	 */
+	async function updatePhotoDetails(photoId, updates) {
+		if (!$session?.user) return;
+		await supabase
+			.from('user_photos')
+			.update(updates)
+			.eq('id', photoId)
+			.eq('user_id', $session.user.id);
+		await loadPhotos();
+	}
+
+	// ------------------ Helpers de archivo, preview y upload ------------------
+
+	// abrir diálogo de archivo y devolución del File
+	/**
+	 * @param {(file: File) => void | Promise<void>} callback
+	 * @param {string} [accept]
+	 */
 	function openFileDialog(callback, accept = 'image/*,video/*') {
-		const i = document.createElement('input');
-		i.type = 'file';
-		i.accept = accept;
-		i.onchange = e => e.target.files[0] && callback(e.target.files[0]);
-		i.click();
-	}
-
-	// === CENSURA Y PREVIEW ===
-	async function detectFaces(file) {
-		const url = URL.createObjectURL(file);
-		const img = new Image();
-		await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
-		let detections = [];
-		try {
-			detections = await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks();
-		} finally {
-			URL.revokeObjectURL(url);
-		}
-		return detections;
-	}
-
-	async function pixelateFacesInImage(file, detections) {
-		const url = URL.createObjectURL(file);
-		const img = new Image();
-		await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
-		const canvas = document.createElement('canvas');
-		canvas.width = img.width;
-		canvas.height = img.height;
-		const ctx = canvas.getContext('2d');
-		ctx.drawImage(img, 0, 0);
-		URL.revokeObjectURL(url);
-		for (const det of detections) {
-			const box = det.detection.box;
-			const sx = Math.max(0, Math.floor(box.x));
-			const sy = Math.max(0, Math.floor(box.y));
-			const sw = Math.min(canvas.width - sx, Math.floor(box.width));
-			const sh = Math.min(canvas.height - sy, Math.floor(box.height));
-			if (sw <= 0 || sh <= 0) continue;
-			const blockW = Math.max(4, Math.floor(sw / 8));
-			const blockH = Math.max(4, Math.floor(sh / 8));
-			ctx.drawImage(canvas, sx, sy, sw, sh, sx, sy, blockW, blockH);
-			ctx.drawImage(canvas, sx, sy, blockW, blockH, sx, sy, sw, sh);
-		}
-		return canvas.toDataURL('image/jpeg', 0.85);
-	}
-
-	async function captureVideoThumbnail(file) {
-		const url = URL.createObjectURL(file);
-		const video = document.createElement('video');
-		video.src = url;
-		video.muted = true;
-		video.playsinline = true;
-		await new Promise((res, rej) => { video.onloadeddata = res; video.onerror = rej; });
-		try {
-			video.currentTime = Math.min(0.5, video.duration || 1);
-			await new Promise(res => { video.onseeked = res; });
-		} catch { /* sin frame */ }
-		const canvas = document.createElement('canvas');
-		canvas.width = video.videoWidth || 320;
-		canvas.height = video.videoHeight || 240;
-		canvas.getContext('2d').drawImage(video, 0, 0);
-		URL.revokeObjectURL(url);
-		return canvas.toDataURL('image/jpeg', 0.85);
-	}
-
-	function cancelPreview() {
-		if (preview?.url) URL.revokeObjectURL(preview.url);
-		preview = null;
-	}
-
-	function handleAddMedia() {
-		openFileDialog(preparePreviewFromFile, 'image/*,video/*');
-	}
-
-	async function preparePreviewFromFile(file) {
-		const isImage = file.type.startsWith('image/');
-		const isVideo = file.type.startsWith('video/');
-		if (!isImage && !isVideo) return alert('Formato no soportado');
-
-		preview = {
-			file,
-			type: isImage ? 'image' : 'video',
-			filename: file.name,
-			url: URL.createObjectURL(file),
-			censoredDataUrl: null,
-			detections: [],
-			thumbnail: null
+		const fileInput = document.createElement('input');
+		fileInput.type = 'file';
+		fileInput.accept = accept;
+		fileInput.onchange = async (e) => {
+			const input = /** @type {HTMLInputElement | null} */ (e.target);
+			const file = input?.files?.[0];
+			if (!file) return;
+			await callback(file);
 		};
-		censorFaces = true;
+		fileInput.click();
+	}
 
-		try {
-			if (isImage) {
-				const detections = await detectFaces(file);
-				preview.detections = detections;
-				if (detections.length > 0) {
-					preview.censoredDataUrl = await pixelateFacesInImage(file, detections);
+	// Sube archivo a R2 usando la URL prefirmada del backend.
+	// La publicUrl la calcula y devuelve el servidor: el cliente nunca la arma.
+	/**
+	 * @param {File} file
+	 * @param {string} folder una de R2_FOLDERS
+	 * @returns {Promise<{ publicUrl: string, key: string }>}
+	 */
+	async function putToR2(file, folder) {
+		return uploadToR2(file, folder, {
+			onProgress: (percent) => (uploadProgress = percent)
+		});
+	}
+
+	// ------------------ AVATAR ------------------
+
+	/**
+	 * Sube el avatar. Sin preview ni censura facial: pixelar el rostro
+	 * anularia el proposito de una foto de perfil.
+	 */
+	function uploadAvatar() {
+		if (!$session?.user) return;
+
+		openFileDialog(async (file) => {
+			avatarError = '';
+			avatarUploading = true;
+
+			try {
+				const clientError = validateImageFile(file);
+				if (clientError) throw new Error(clientError);
+
+				const { publicUrl, key } = await putToR2(file, R2_FOLDERS.avatar);
+
+				const { error } = await supabase
+					.from('profiles')
+					.update({ avatar_key: publicUrl })
+					.eq('id', $session.user.id);
+
+				if (error) throw error;
+
+				foto = publicUrl;
+
+				// La clave anterior solo se borra si es nuestra y del bucket publico.
+				// El endpoint devuelve 403 ante cualquier otra cosa, asi que es seguro.
+				const previousKey = previousAvatarKey;
+				previousAvatarKey = key;
+
+				if (previousKey && previousKey !== key) {
+					await deleteR2Object(previousKey, R2_FOLDERS.avatar);
 				}
-			} else if (isVideo) {
-				const thumb = await captureVideoThumbnail(file);
-				if (thumb) {
-					const detections = await detectFacesFromDataUrl(thumb);
-					preview.detections = detections;
-					preview.thumbnail = thumb;
-					if (detections.length > 0) {
-						preview.censoredDataUrl = await pixelateFacesFromDataUrl(thumb, detections);
-					}
-				}
+			} catch (e) {
+				avatarError = e instanceof Error ? e.message : String(e);
+				console.error('Error subiendo avatar:', e);
+			} finally {
+				avatarUploading = false;
 			}
-		} catch (e) {
-			console.warn('Detección de rostros:', e);
+		});
+	}
+
+	/** Quita el avatar: borra de R2 y limpia profiles.avatar_key. */
+	async function removeAvatar() {
+		if (!$session?.user || !foto) return;
+
+		const key = previousAvatarKey;
+
+		foto = '';
+		previousAvatarKey = '';
+		avatarError = '';
+
+		const { error } = await supabase
+			.from('profiles')
+			.update({ avatar_key: null })
+			.eq('id', $session.user.id);
+
+		if (error) {
+			avatarError = error.message;
+			return;
+		}
+
+		if (key) {
+			await deleteR2Object(key, R2_FOLDERS.avatar);
 		}
 	}
 
-	async function detectFacesFromDataUrl(dataUrl) {
-		const img = new Image();
-		await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = dataUrl; });
-		try {
-			return await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks();
-		} catch {
-			return [];
+	// sube un File a storage en bucket dado; retorna { path, url } - MANTENIDO POR COMPATIBILIDAD
+	/**
+	 * @param {File} file
+	 * @param {string} bucket
+	 * @returns {Promise<{ path: string, url: string }>}
+	 */
+	async function uploadToStorage(file, bucket) {
+		if (!$session?.user) throw new Error('No hay sesión para subir a storage');
+		const filename = `${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
+		const path = `${$session.user.id}/${filename}`;
+		const { data, error } = await supabase.storage
+			.from(bucket)
+			.upload(path, file, { upsert: true });
+		if (error) throw error;
+		const url = supabase.storage.from(bucket).getPublicUrl(data.path).data.publicUrl;
+		return { path: data.path, url };
+	}
+
+	// --- CREAR PREVIEW antes de subir (imagen o video) ---
+	// uploadTarget: 'album' | 'banner'
+	/**
+	 * @param {File} file
+	 * @param {'album' | 'banner'} [uploadTarget]
+	 */
+	async function preparePreviewFromFile(file, uploadTarget = 'album') {
+		preview = null;
+		const type = file.type.startsWith('video/') ? 'video' : 'image';
+		const url = URL.createObjectURL(file);
+		const filename = file.name;
+
+		// detect faces and, if image, produce censoredDataUrl if requested
+		if (type === 'image') {
+			const img = await loadImage(url);
+			const detections = await detectFacesImageElement(img);
+			let censoredDataUrl = null;
+			if (detections && detections.length && censorFaces) {
+				censoredDataUrl = pixelateImageElement(img, detections, 12); // pixel size 12
+			}
+			preview = { type, file, url, detections, censoredDataUrl, filename, uploadTarget };
+		} else {
+			// video: capture first frame and detect faces there
+			const frameCanvas = await captureVideoFirstFrame(url);
+			const detections = await detectFacesCanvas(frameCanvas);
+			let censoredDataUrl = null;
+			if (detections && detections.length && censorFaces) {
+				// pixelar el canvas (modifica el canvas y exporta dataURL)
+				censoredDataUrl = pixelateCanvas(frameCanvas, detections, 12);
+			}
+			preview = {
+				type,
+				file,
+				url,
+				detections,
+				censoredDataUrl,
+				filename,
+				thumbnailCanvas: frameCanvas,
+				uploadTarget
+			};
 		}
 	}
 
-	async function pixelateFacesFromDataUrl(dataUrl, detections) {
-		const img = new Image();
-		await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = dataUrl; });
-		const canvas = document.createElement('canvas');
-		canvas.width = img.width;
-		canvas.height = img.height;
-		const ctx = canvas.getContext('2d');
-		ctx.drawImage(img, 0, 0);
-		for (const det of detections) {
-			const box = det.detection.box;
-			const sx = Math.max(0, Math.floor(box.x));
-			const sy = Math.max(0, Math.floor(box.y));
-			const sw = Math.min(canvas.width - sx, Math.floor(box.width));
-			const sh = Math.min(canvas.height - sy, Math.floor(box.height));
-			if (sw <= 0 || sh <= 0) continue;
-			const blockW = Math.max(4, Math.floor(sw / 8));
-			const blockH = Math.max(4, Math.floor(sh / 8));
-			ctx.drawImage(canvas, sx, sy, sw, sh, sx, sy, blockW, blockH);
-			ctx.drawImage(canvas, sx, sy, blockW, blockH, sx, sy, sw, sh);
-		}
-		return canvas.toDataURL('image/jpeg', 0.85);
+	// función para abrir diálogo y crear preview (usada por botón "Agregar Foto/Video")
+	async function handleAddMedia() {
+		openFileDialog(async (file) => {
+			const problem = validateImageFile(file);
+			if (problem) {
+				alert(problem);
+				return;
+			}
+			await preparePreviewFromFile(file);
+			// ahora preview contiene url / censoredDataUrl / detections
+			// usuario puede decidir "Subir" o "Cancelar" y si quiere subir censurado o no
+		}, 'image/*');
 	}
 
-	async function uploadPreview(applyCensor) {
-		if (!preview) return;
+	// subir la preview a R2 (imagen o video) con censura facial opcional
+	// uploadTarget: 'album' | 'banner'
+	async function uploadPreview(confirmCensor = false) {
+		if (!preview || !$session?.user) return;
 		isUploadingPreview = true;
 		try {
-			const isVideo = preview.type === 'video';
-			const tipo = isVideo ? 'video' : 'photo';
-			const esPrivado = false;
+			const target = preview.uploadTarget || 'album';
+			const folder = target === 'banner' ? R2_FOLDERS.cover : R2_FOLDERS.post;
 
-			const req = await requestUpload({ tipo, filename: preview.file.name, contentType: preview.file.type, es_privado: esPrivado });
-			await uploadBlobToR2(req.upload_url, preview.file, preview.file.type);
+			if (preview.type === 'image') {
+				const fileToUpload =
+					confirmCensor && preview.censoredDataUrl
+						? new File([dataURLtoBlob(preview.censoredDataUrl)], preview.filename, {
+								type: 'image/png'
+							})
+						: preview.file;
 
-			let thumbnailKey = null, thumbnailUrl = null;
-			if (isVideo && preview.censoredDataUrl) {
-				const thumbReq = await requestUpload({ tipo: 'photo', filename: `thumb-${preview.file.name}.jpg`, contentType: 'image/jpeg', es_privado: false });
-				const blob = await (await fetch(preview.censoredDataUrl)).blob();
-				await uploadBlobToR2(thumbReq.upload_url, blob, 'image/jpeg');
-				thumbnailKey = thumbReq.storage_key;
-				thumbnailUrl = thumbReq.public_url;
+				const { publicUrl, key } = await putToR2(fileToUpload, folder);
+
+				if (target === 'banner') {
+					// Guardar en user_banners
+					await supabase.from('user_banners').insert({
+						user_id: $session.user.id,
+						storage_path: key,
+						public_url: publicUrl,
+						orden: bannerPhotos.length
+					});
+					await loadBannerPhotos();
+					currentBannerIndex = bannerPhotos.length - 1;
+				} else {
+					// Guardar en user_photos (álbum)
+					await supabase.from('user_photos').insert({
+						user_id: $session.user.id,
+						storage_path: key,
+						public_url: publicUrl,
+						filename: preview.filename,
+						orden: photos.length,
+						titulo: '',
+						descripcion: '',
+						mime_type: fileToUpload.type
+					});
+					await loadPhotos();
+				}
+			} else {
+				// video: subir video original a R2
+				const { publicUrl: videoUrl, key: videoKey } = await putToR2(preview.file, folder);
+
+				let thumbnailUrl = null;
+				if (confirmCensor && preview.censoredDataUrl) {
+					// Subir thumbnail censurado a R2
+					const blob = dataURLtoBlob(preview.censoredDataUrl);
+					const thumbName = `thumb-${preview.filename}.png`;
+					const { publicUrl: thumbUrl } = await putToR2(
+						new File([blob], thumbName, { type: 'image/png' }),
+						folder
+					);
+					thumbnailUrl = thumbUrl;
+				}
+
+				if (target === 'banner') {
+					await supabase.from('user_banners').insert({
+						user_id: $session.user.id,
+						storage_path: videoKey,
+						public_url: videoUrl,
+						orden: bannerPhotos.length
+					});
+					await loadBannerPhotos();
+					currentBannerIndex = bannerPhotos.length - 1;
+				} else {
+					await supabase.from('user_photos').insert({
+						user_id: $session.user.id,
+						storage_path: videoKey,
+						public_url: videoUrl,
+						filename: preview.filename,
+						orden: photos.length,
+						titulo: '',
+						descripcion: '',
+						thumbnail_url: thumbnailUrl,
+						mime_type: preview.file.type
+					});
+					await loadPhotos();
+				}
 			}
 
-			await insertMedia({
-				user_id: $session.user.id,
-				tipo,
-				bucket: req.bucket,
-				storage_key: req.storage_key,
-				public_url: req.public_url,
-				thumbnail_key: thumbnailKey,
-				thumbnail_url: thumbnailUrl,
-				es_privado: esPrivado,
-				orden: photos.length
-			});
-			cancelPreview();
-			await loadPhotos();
+			// limpiar preview y recargar
+			preview = null;
 		} catch (e) {
-			alert('Error al subir: ' + (e?.message ?? e));
+			console.error('Error uploading preview:', e);
+			alert('Error al subir el archivo.');
 		} finally {
 			isUploadingPreview = false;
 		}
 	}
 
-	async function uploadFileDirect() {
-		openFileDialog(async (file) => {
-			try {
-				const isVideo = file.type.startsWith('video/');
-				const tipo = isVideo ? 'video' : 'photo';
-				const req = await requestUpload({ tipo, filename: file.name, contentType: file.type, es_privado: false });
-				await uploadBlobToR2(req.upload_url, file, file.type);
-				await insertMedia({
-					user_id: $session.user.id,
-					tipo,
-					bucket: req.bucket,
-					storage_key: req.storage_key,
-					public_url: req.public_url,
-					es_privado: false,
-					orden: photos.length
-				});
-				await loadPhotos();
-			} catch (e) {
-				alert('Error: ' + (e?.message ?? e));
-			}
-		}, 'image/*,video/*');
+	// cancelar preview
+	function cancelPreview() {
+		if (preview?.url) URL.revokeObjectURL(preview.url);
+		preview = null;
 	}
 
-	// === CRUD ÁLBUM ===
-	async function deletePhoto(id) {
-		if (!confirm('¿Eliminar este elemento?')) return;
-		const res = await fetch('/api/media/delete', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ media_id: id })
+	// ------------------ UTIL: cargar imagen / video / detectar caras / pixelar ------------------
+
+	/**
+	 * @param {string} url
+	 * @returns {Promise<HTMLImageElement>}
+	 */
+	function loadImage(url) {
+		return new Promise((resolve, reject) => {
+			const img = new Image();
+			img.crossOrigin = 'anonymous';
+			img.onload = () => resolve(img);
+			img.onerror = reject;
+			img.src = url;
 		});
-		const data = await res.json();
-		if (!data.ok) return alert(data.error || 'Error al eliminar');
-		if (selectedPhoto?.id === id) selectedPhoto = null;
-		await loadPhotos();
 	}
 
-	async function openPhotoModal(photo) {
-		selectedPhoto = { ...photo };
-		photoComment = '';
-		await loadPhotoComments(photo.id);
-		if (!photo.public_url) {
-			try {
-				const res = await fetch('/api/media/presign', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ media_id: photo.id })
-				});
-				const data = await res.json();
-				if (data.url) selectedPhoto = { ...selectedPhoto, public_url: data.url };
-			} catch { /* sin URL */ }
+	/**
+	 * @param {string} videoUrl
+	 * @param {number} [seekTime]
+	 * @returns {Promise<HTMLCanvasElement>}
+	 */
+	async function captureVideoFirstFrame(videoUrl, seekTime = 0.1) {
+		return new Promise((resolve, reject) => {
+			const video = document.createElement('video');
+			video.crossOrigin = 'anonymous';
+			video.src = videoUrl;
+			video.muted = true;
+			video.playsInline = true;
+			video.currentTime = 0;
+			// wait metadata to set size
+			video.addEventListener(
+				'loadedmetadata',
+				() => {
+					// Seek to a small time (some videos need it)
+					const onSeeked = () => {
+						const canvas = document.createElement('canvas');
+						canvas.width = video.videoWidth;
+						canvas.height = video.videoHeight;
+						const ctx = canvas.getContext('2d');
+						if (!ctx) {
+							reject(new Error('No se pudo obtener el contexto 2D del canvas'));
+							return;
+						}
+						ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+						// cleanup
+						video.pause();
+						resolve(canvas);
+					};
+					const trySeek = () => {
+						video.currentTime = Math.min(seekTime, Math.max(0.01, video.duration * 0.01));
+					};
+					video.addEventListener('seeked', onSeeked, { once: true });
+					trySeek();
+				},
+				{ once: true }
+			);
+			video.addEventListener('error', () =>
+				reject(new Error('Error al cargar video para captura de frame'))
+			);
+		});
+	}
+
+	// detect faces en un elemento image (HTMLImageElement)
+	/**
+	 * @param {HTMLImageElement} imgEl
+	 * @returns {Promise<FaceBox[]>}
+	 */
+	async function detectFacesImageElement(imgEl) {
+		try {
+			const detections = await faceapi.detectAllFaces(imgEl, new faceapi.TinyFaceDetectorOptions());
+			// detections: array de boxes con .box { x, y, width, height }
+			return detections.map((d) => d.box);
+		} catch (e) {
+			console.warn('face-api detect error (image):', e);
+			return [];
 		}
 	}
 
-	async function updatePhotoDetails(id, patch) {
-		const { error } = await supabase.from('media').update(patch).eq('id', id);
-		if (error) console.error('updatePhotoDetails:', error);
+	// detect faces en canvas
+	/**
+	 * @param {HTMLCanvasElement} canvasEl
+	 * @returns {Promise<FaceBox[]>}
+	 */
+	async function detectFacesCanvas(canvasEl) {
+		try {
+			const detections = await faceapi.detectAllFaces(
+				canvasEl,
+				new faceapi.TinyFaceDetectorOptions()
+			);
+			return detections.map((d) => d.box);
+		} catch (e) {
+			console.warn('face-api detect error (canvas):', e);
+			return [];
+		}
 	}
 
-	async function loadPhotoComments(mediaId) {
-		const { data } = await supabase
-			.from('comments')
-			.select('id, content, created_at, profiles (nombre)')
-			.eq('media_id', mediaId)
-			.order('created_at');
-		photoComments = data || [];
-	}
-
-	async function addPhotoComment() {
-		if (!photoComment.trim() || !selectedPhoto) return;
-		const { error } = await supabase.from('comments').insert({
-			media_id: selectedPhoto.id,
-			user_id: $session.user.id,
-			content: photoComment.trim()
+	// DETECCIÓN: crea canvas pixelado y devuelve dataURL (imagen PNG)
+	/**
+	 * @param {HTMLImageElement} imgEl
+	 * @param {FaceBox[]} boxes
+	 * @param {number} [pixelSize]
+	 * @returns {string}
+	 */
+	function pixelateImageElement(imgEl, boxes, pixelSize = 10) {
+		const canvas = document.createElement('canvas');
+		canvas.width = imgEl.naturalWidth || imgEl.width;
+		canvas.height = imgEl.naturalHeight || imgEl.height;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('No se pudo obtener el contexto 2D del canvas');
+		ctx.drawImage(imgEl, 0, 0);
+		// pixelate each box
+		boxes.forEach((box) => {
+			pixelateRect(ctx, box.x, box.y, box.width, box.height, pixelSize);
 		});
-		if (error) return alert(error.message);
-		photoComment = '';
-		await loadPhotoComments(selectedPhoto.id);
+		return canvas.toDataURL('image/png');
+	}
+
+	/**
+	 * @param {HTMLCanvasElement} canvasEl
+	 * @param {FaceBox[]} boxes
+	 * @param {number} [pixelSize]
+	 * @returns {string}
+	 */
+	function pixelateCanvas(canvasEl, boxes, pixelSize = 10) {
+		const canvas = document.createElement('canvas');
+		canvas.width = canvasEl.width;
+		canvas.height = canvasEl.height;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('No se pudo obtener el contexto 2D del canvas');
+		ctx.drawImage(canvasEl, 0, 0);
+		boxes.forEach((box) => {
+			pixelateRect(ctx, box.x, box.y, box.width, box.height, pixelSize);
+		});
+		return canvas.toDataURL('image/png');
+	}
+
+	// pixelateRect helper: reduce resolution of rect and scale back
+	/**
+	 * @param {CanvasRenderingContext2D} ctx
+	 * @param {number} x
+	 * @param {number} y
+	 * @param {number} w
+	 * @param {number} h
+	 * @param {number} pixelSize
+	 */
+	function pixelateRect(ctx, x, y, w, h, pixelSize) {
+		// clamp
+		x = Math.max(0, Math.floor(x));
+		y = Math.max(0, Math.floor(y));
+		w = Math.max(1, Math.floor(w));
+		h = Math.max(1, Math.floor(h));
+		// get image data for rect
+		const tmp = document.createElement('canvas');
+		tmp.width = w;
+		tmp.height = h;
+		const tctx = tmp.getContext('2d');
+		if (!tctx) throw new Error('No se pudo obtener el contexto 2D del canvas temporal');
+		tctx.drawImage(ctx.canvas, x, y, w, h, 0, 0, w, h);
+		// scale down
+		const sw = Math.max(1, Math.floor(w / pixelSize));
+		const sh = Math.max(1, Math.floor(h / pixelSize));
+		const small = document.createElement('canvas');
+		small.width = sw;
+		small.height = sh;
+		const sctx = small.getContext('2d');
+		if (!sctx) throw new Error('No se pudo obtener el contexto 2D del canvas reducido');
+		sctx.imageSmoothingEnabled = false;
+		sctx.drawImage(tmp, 0, 0, w, h, 0, 0, sw, sh);
+		// scale back up
+		tctx.imageSmoothingEnabled = false;
+		tctx.clearRect(0, 0, w, h);
+		tctx.drawImage(small, 0, 0, sw, sh, 0, 0, w, h);
+		// put back into main ctx
+		ctx.drawImage(tmp, 0, 0, w, h, x, y, w, h);
+	}
+
+	// convierte dataURL a Blob
+	/**
+	 * @param {string} dataurl
+	 * @returns {Blob}
+	 */
+	function dataURLtoBlob(dataurl) {
+		const arr = dataurl.split(',');
+		const mime = /** @type {string} */ (arr[0].match(/:(.*?);/)?.[1] ?? '');
+		const bstr = atob(arr[1]);
+		let n = bstr.length;
+		const u8arr = new Uint8Array(n);
+		while (n--) u8arr[n] = bstr.charCodeAt(n);
+		return new Blob([u8arr], { type: mime });
+	}
+
+	// Upload directo a R2 (sin preview, pero con censura facial automática si hay caras)
+	async function uploadFileDirect() {
+		openFileDialog(async (file) => {
+			if (!file) return;
+			if (!$session?.user) return;
+			const problem = validateImageFile(file);
+			if (problem) {
+				alert(problem);
+				return;
+			}
+
+			// Detectar caras y censurar si es imagen
+			let fileToUpload = file;
+			if (file.type.startsWith('image/')) {
+				const url = URL.createObjectURL(file);
+				const img = await loadImage(url);
+				const detections = await detectFacesImageElement(img);
+				if (detections && detections.length) {
+					const censoredDataUrl = pixelateImageElement(img, detections, 12);
+					const blob = dataURLtoBlob(censoredDataUrl);
+					fileToUpload = new File([blob], file.name, { type: 'image/png' });
+				}
+				URL.revokeObjectURL(url);
+			}
+
+			// Subir a R2
+			const { publicUrl, key } = await putToR2(fileToUpload, R2_FOLDERS.post);
+
+			await supabase.from('user_photos').insert({
+				user_id: $session.user.id,
+				storage_path: key,
+				public_url: publicUrl,
+				filename: file.name,
+				orden: photos.length,
+				titulo: '',
+				descripcion: '',
+				mime_type: fileToUpload.type
+			});
+			await loadPhotos();
+		}, 'image/*');
 	}
 </script>
 
-<!-- BANNER MEJORADO -->
-<div class="relative h-96 bg-black rounded-2xl overflow-hidden mb-8">
-	{#if bannerPhotos.length === 0}
-		<div class="h-full flex items-center justify-center bg-gradient-to-br from-gray-800 to-black text-white text-3xl font-bold">
-			Fotos o video
-		</div>
+<!-- Banner -->
+<div class="relative h-64 w-full">
+	{#if bannerPhotos.length > 0}
+		<img
+			src={bannerPhotos[currentBannerIndex]}
+			alt="Banner"
+			class="mx-auto block h-full rounded-lg object-fill object-center"
+		/>
 	{:else}
-		<!-- Contenido clicable -->
-		<div
-			class="relative h-full cursor-pointer"
-			on:click={() => selectedBanner = bannerPhotos[currentBannerIndex].public_url}
-		>
-			{#if bannerPhotos[currentBannerIndex].public_url?.match(/\.(mp4|webm|ogg|mov)$/i)}
-				<!-- VIDEO -->
-				<video
-					src={bannerPhotos[currentBannerIndex].public_url}
-					class="w-full h-full object-cover"
-					muted
-					loop
-					playsinline
-				/>
-				<!-- Play grande -->
-				<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-					<div class="bg-black/60 rounded-full p-8">
-						<svg class="w-20 h-20 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-					</div>
-				</div>
-			{:else}
-				<!-- FOTO -->
-				<img
-					src={bannerPhotos[currentBannerIndex].public_url}
-					alt="Banner"
-					class="w-full h-full object-cover"
-				/>
-			{/if}
+		<div class="absolute inset-0 flex items-center justify-center bg-gray-700 text-white">
+			<button
+				type="button"
+				on:click={uploadBanner}
+				class="rounded-lg bg-white/20 px-4 py-2 font-medium hover:bg-white/30"
+			>
+				Cargar portada
+			</button>
 		</div>
 	{/if}
 
 	<!-- Flechas -->
-	{#if bannerPhotos.length > 1}
-		<button
-			on:click|stopPropagation={prevBanner}
-			class="absolute left-4 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black text-white w-14 h-14 rounded-full flex items-center justify-center text-4xl z-10"
-		>‹</button>
-		<button
-			on:click|stopPropagation={nextBanner}
-			class="absolute right-4 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black text-white w-14 h-14 rounded-full flex items-center justify-center text-4xl z-10"
-		>›</button>
-	{/if}
-
-	<!-- Menú tres puntos -->
-	<div class="absolute top-4 right-4 z-20">
-		<button
-			bind:this={buttonRef}
-			on:click|stopPropagation={() => showMenu = !showMenu}
-			class="bg-white/90 hover:bg-white p-3 rounded-full shadow-xl"
-		>⋮</button>
-
-		{#if showMenu}
-			<div
-				bind:this={menuRef}
-				class="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border overflow-hidden"
-			>
-				<button
-					on:click|stopPropagation={() => { uploadBanner(); showMenu = false }}
-					class="w-full text-left px-6 py-4 hover:bg-gray-100 font-medium"
-				>Subir foto o video</button>
-				{#if bannerPhotos.length > 0}
-					<button
-						on:click|stopPropagation={() => { deleteCurrentBanner(); showMenu = false }}
-						class="w-full text-left px-6 py-4 text-red-600 hover:bg-red-50 font-medium"
-					>Borrar actual</button>
-				{/if}
-			</div>
-		{/if}
-	</div>
-</div>
-
-<!-- MODAL FULLSCREEN (grande con X) -->
-{#if selectedBanner}
-	<div
-		class="fixed inset-0 bg-black/95 z-[9999] flex items-center justify-center p-4"
-		on:click={() => selectedBanner = null}
+	<button
+		on:click={prevBanner}
+		class="absolute top-1/2 left-2 -translate-y-1/2 rounded-full bg-white/70 p-2 hover:bg-white"
+		>◀</button
 	>
-		<div class="relative max-w-7xl w-full max-h-full">
-			<button
-				on:click|stopPropagation={() => selectedBanner = null}
-				class="absolute -top-12 right-0 text-white text-5xl hover:text-gray-300"
-			>×</button>
+	<button
+		on:click={nextBanner}
+		class="absolute top-1/2 right-2 -translate-y-1/2 rounded-full bg-white/70 p-2 hover:bg-white"
+		>▶</button
+	>
 
-			{#if selectedBanner.match(/\.(mp4|webm|ogg|mov)$/i)}
-				<video
-					src={selectedBanner}
-					controls
-					class="w-full max-h-screen rounded-2xl shadow-2xl"
-				/>
-			{:else}
-				<img
-					src={selectedBanner}
-					alt="Banner grande"
-					class="w-full max-h-screen rounded-2xl object-contain shadow-2xl"
-				/>
+	<!-- Menú del banner -->
+	<div class="absolute top-4 right-4">
+		<div class="relative">
+			<button
+				bind:this={buttonRef}
+				class="rounded-full bg-white p-2 shadow-lg hover:bg-gray-100"
+				on:click={() => (showMenu = !showMenu)}
+			>
+				⋮
+			</button>
+
+			{#if showMenu}
+				<div
+					bind:this={menuRef}
+					class="absolute right-0 z-50 mt-2 w-44 overflow-hidden rounded-xl border bg-white shadow-xl"
+				>
+					<button
+						on:click={() => {
+							showMenu = false;
+							verBanner();
+						}}
+						class="block w-full px-4 py-2 text-left hover:bg-gray-100">👁️ Ver</button
+					>
+					<button
+						on:click={() => {
+							showMenu = false;
+							uploadBanner();
+						}}
+						class="block w-full px-4 py-2 text-left hover:bg-gray-100">⬆️ Subir Portada</button
+					>
+					<button
+						on:click={() => {
+							showMenu = false;
+							deleteCurrentBanner();
+						}}
+						class="block w-full px-4 py-2 text-left text-red-600 hover:bg-red-100">🗑️ Borrar</button
+					>
+				</div>
 			{/if}
 		</div>
 	</div>
-{/if}
+</div>
 
 <!-- Contenido principal -->
 <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
 	<div class="relative rounded-xl border border-gray-200 bg-white p-6 shadow-lg md:p-8">
-		<!-- Edit Button -->
+		<!-- Edit Button (mantengo) -->
 		<button
 			type="button"
 			on:click={() => {
@@ -605,30 +1008,79 @@
 		</button>
 
 		<!-- Header -->
-		<div class="mb-8 text-center">
-			<h1 class="mb-2 text-3xl font-bold text-gray-900 md:text-4xl">
-				{#if editing}
-					<input
-						bind:value={nombre}
-						class="w-full max-w-md border-b-2 border-blue-500 bg-transparent text-center text-3xl font-bold focus:outline-none"
-						placeholder="Tu nombre"
+		<div class="mb-8 flex flex-col items-center gap-4 text-center sm:flex-row sm:text-left">
+			<!-- Avatar -->
+			<div class="relative shrink-0">
+				{#if foto}
+					<img
+						src={foto}
+						alt="Tu foto de perfil"
+						class="h-24 w-24 rounded-full border border-gray-200 object-cover shadow"
 					/>
 				{:else}
-					{nombre}
+					<div
+						class="flex h-24 w-24 items-center justify-center rounded-full border-2 border-dashed border-gray-300 bg-gray-100 text-3xl font-bold text-gray-400"
+						aria-hidden="true"
+					>
+						{nombre.slice(0, 1).toUpperCase()}
+					</div>
 				{/if}
-			</h1>
-			<p class="mb-1 text-lg text-gray-600">
-				{#if editing}
-					<input
-						bind:value={email}
-						type="email"
-						class="w-full max-w-sm border-b border-gray-300 bg-transparent text-center focus:border-blue-500 focus:outline-none"
-						placeholder="Tu email"
-					/>
-				{:else}
+
+				{#if avatarUploading}
+					<div
+						class="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-xs font-medium text-white"
+					>
+						{uploadProgress}%
+					</div>
+				{/if}
+			</div>
+
+			<div class="min-w-0 flex-1">
+				<h1 class="mb-2 text-3xl font-bold text-gray-900 md:text-4xl">
+					{#if editing}
+						<input
+							bind:value={nombre}
+							class="w-full max-w-md border-b-2 border-blue-500 bg-transparent text-center text-3xl font-bold focus:outline-none"
+							placeholder="Tu nombre"
+						/>
+					{:else}
+						{nombre}
+					{/if}
+				</h1>
+				<p class="mb-1 text-lg text-gray-600">
 					{email}
+				</p>
+
+				<div class="mt-3 flex flex-wrap justify-center gap-2 sm:justify-start">
+					<button
+						type="button"
+						on:click={uploadAvatar}
+						disabled={avatarUploading}
+						class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+					>
+						{avatarUploading ? 'Subiendo...' : foto ? 'Cambiar foto' : 'Subir foto'}
+					</button>
+
+					{#if foto}
+						<button
+							type="button"
+							on:click={removeAvatar}
+							disabled={avatarUploading}
+							class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50"
+						>
+							Quitar foto
+						</button>
+					{/if}
+				</div>
+
+				{#if avatarError}
+					<p class="mt-2 text-sm text-red-600">{avatarError}</p>
 				{/if}
-			</p>
+
+				<p class="mt-2 text-xs text-gray-500">
+					JPG, PNG, WEBP o GIF. Máximo {MAX_UPLOAD_BYTES / (1024 * 1024)} MB.
+				</p>
+			</div>
 		</div>
 
 		<!-- Bio -->
@@ -659,20 +1111,37 @@
 			<div class="mb-4 flex gap-3">
 				<button
 					on:click={handleAddMedia}
-					class="rounded-lg bg-blue-600 px-6 py-2 text-white hover:bg-blue-700"
-					>Agregar Foto/Video</button
+					class="rounded-lg bg-blue-600 px-6 py-2 text-white hover:bg-blue-700">Agregar Foto</button
 				>
 				<button
 					on:click={uploadFileDirect}
 					class="rounded-lg bg-gray-200 px-4 py-2 hover:bg-gray-300"
-					>Subir directo (sin preview)</button
+					>Subir directo (censura automática)</button
 				>
 			</div>
 
 			<!-- PREVIEW antes de subir -->
 			{#if preview}
 				<div class="mb-6 rounded-lg border bg-gray-50 p-4">
-					<h3 class="mb-2 font-semibold">Vista previa — {preview.filename}</h3>
+					<h3 class="mb-2 font-semibold">
+						Vista previa — {preview.filename}
+						{preview.uploadTarget === 'banner' ? '(Banner)' : '(Álbum)'}
+					</h3>
+
+					{#if isUploadingPreview && uploadProgress > 0}
+						<div class="mb-4">
+							<div class="mb-1 flex justify-between text-sm">
+								<span>Subiendo a R2...</span>
+								<span>{uploadProgress}%</span>
+							</div>
+							<div class="h-2 w-full rounded-full bg-gray-200">
+								<div
+									class="h-2 rounded-full bg-green-500 transition-all"
+									style="width: {uploadProgress}%"
+								></div>
+							</div>
+						</div>
+					{/if}
 
 					{#if preview.type === 'image'}
 						<div class="flex items-start gap-4">
@@ -741,11 +1210,11 @@
 			<div class="relative grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
 				{#each photos as photo}
 					<div class="group relative">
-						{#if photo.filename && photo.filename.match(/\.(mp4|webm|ogg|mov)$/i)}
-							<!-- video -->
+						{#if photo.public_url && photo.filename && photo.filename.match(/\.(mp4|webm|ogg|mov)$/i)}
+							<!-- video thumbnail if video (use thumbnail_url si existe) -->
 							<div class="h-48 w-full overflow-hidden rounded-lg bg-black">
 								<video
-									src={photo.public_url || photo.thumbnail_url || '/aguaenlaboca.jpeg'}
+									src={photo.public_url}
 									class="h-full w-full object-cover"
 									muted
 									playsinline
@@ -754,7 +1223,7 @@
 							</div>
 						{:else}
 							<img
-								src={photo.thumbnail_url || photo.public_url || '/aguaenlaboca.jpeg'}
+								src={photo.thumbnail_url ?? photo.public_url}
 								alt={photo.titulo || 'Foto'}
 								class="h-full w-full rounded-lg object-cover object-fill"
 								on:click={() => openPhotoModal(photo)}
@@ -787,7 +1256,9 @@
 
 		<!-- Modal de Foto/Video Grande -->
 		{#if selectedPhoto}
-			<div class="bg-opacity-75 fixed relative inset-0 z-50 flex items-center justify-center bg-black">
+			<div
+				class="bg-opacity-75 fixed relative inset-0 z-50 flex items-center justify-center bg-black"
+			>
 				<div class="relative w-full max-w-4xl rounded-lg bg-white p-4">
 					<button
 						on:click={() => (selectedPhoto = null)}
@@ -802,7 +1273,7 @@
 						></video>
 					{:else}
 						<img
-							src={selectedPhoto.public_url || '/aguaenlaboca.jpeg'}
+							src={selectedPhoto.public_url}
 							alt={selectedPhoto.titulo || 'Foto'}
 							class="mb-4 max-h-[70vh] w-full rounded-lg object-contain"
 						/>
@@ -815,6 +1286,7 @@
 								placeholder="Título"
 								class="w-full rounded-lg border border-gray-300 px-3 py-2"
 								on:input={() =>
+									selectedPhoto &&
 									updatePhotoDetails(selectedPhoto.id, { titulo: selectedPhoto.titulo })}
 							/>
 							<textarea
@@ -823,6 +1295,7 @@
 								rows="3"
 								class="w-full rounded-lg border border-gray-300 px-3 py-2"
 								on:input={() =>
+									selectedPhoto &&
 									updatePhotoDetails(selectedPhoto.id, { descripcion: selectedPhoto.descripcion })}
 							></textarea>
 						{:else}
@@ -840,7 +1313,7 @@
 							{#each photoComments as comment}
 								<div class="mb-2 flex gap-2">
 									<span class="font-medium">{comment.profiles?.nombre || 'Anónimo'}:</span>
-									<span>{comment.content}</span>
+									<span>{comment.comentario}</span>
 								</div>
 							{/each}
 							{#if $session?.user}

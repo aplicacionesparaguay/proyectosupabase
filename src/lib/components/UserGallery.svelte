@@ -1,229 +1,337 @@
 <script>
-  import { supabase } from '$lib/supabaseClient';
-  import { user } from '$lib/stores/auth';
-  import { onMount } from 'svelte';
+	import { supabase } from '$lib/supabaseClient';
+	import { user } from '$lib/stores/auth';
+	import { onMount } from 'svelte';
+	import {
+		uploadToR2,
+		deleteR2Object,
+		validateImageFile,
+		MAX_UPLOAD_BYTES,
+		R2_FOLDERS
+	} from '$lib/upload/r2Upload';
 
-  /** @type {FileList | null} */
-  let files = null;
-  let description = '';
-  /** @type {any[]} */
-  let photos = [];
-  /** @type {Record<string, any[]>} */
-  let comments = {};
-  /** @type {Record<string, string>} */
-  let newComment = {};
-  let loading = false;
+	/** @type {FileList | null} */
+	let files = null;
 
-  async function loadPhotos() {
-    const me = $user;
-    if (!me?.id) return;
-    const { data, error } = await supabase
-      .from('media')
-      .select('id, tipo, storage_key, public_url, thumbnail_url, titulo, descripcion, es_privado, bucket, orden')
-      .eq('user_id', me.id)
-      .neq('tipo', 'banner')
-      .order('orden', { ascending: false });
+	let description = '';
 
-    if (error) {
-      console.error('loadPhotos error:', error);
-    } else {
-      photos = (data ?? []).map(p => ({
-        ...p,
-        filename: p.storage_key.split('/').pop()
-      }));
-    }
-  }
+	/** @type {Array<Record<string, any>>} */
+	let photos = [];
 
-  async function uploadPhoto() {
-    if (!files || !files.length) {
-      return alert('Selecciona una imagen');
-    }
-    const me = $user;
-    if (!me?.id) {
-      return alert('Usuario no autenticado');
-    }
+	/** @type {Record<string, Array<Record<string, any>>>} */
+	let comments = {};
 
-    loading = true;
-    const file = files[0];
+	/** @type {Record<string, string>} */
+	let newComment = {};
 
-    try {
-      // 1) Pedir URL firmada de subida al servidor
-      const res = await fetch('/api/media/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tipo: file.type.startsWith('video/') ? 'video' : 'photo',
-          filename: file.name,
-          contentType: file.type,
-          es_privado: false
-        })
-      });
-      const req = await res.json();
-      if (!res.ok) throw new Error(req.error || 'Error generando subida');
+	let loading = false;
+	let uploadProgress = 0;
 
-      // 2) Subir directo a R2
-      const put = await fetch(req.upload_url, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file
-      });
-      if (!put.ok) throw new Error('Error subiendo archivo a R2');
+	// Cargar fotos del usuario actual
+	async function loadPhotos() {
+		if (!$user?.id) return;
 
-      // 3) Guardar metadata en `media`
-      const { error: insertError } = await supabase.from('media').insert({
-        user_id: me.id,
-        tipo: file.type.startsWith('video/') ? 'video' : 'photo',
-        bucket: req.bucket,
-        storage_key: req.storage_key,
-        public_url: req.public_url,
-        titulo: description,
-        descripcion: description,
-        es_privado: false,
-        orden: photos.length
-      });
+		const { data, error } = await supabase
+			.from('photos')
+			.select('*')
+			.eq('user_id', $user.id)
+			.order('created_at', { ascending: false });
 
-      if (insertError) throw insertError;
+		if (error) {
+			console.error('loadPhotos error:', error);
+		} else {
+			photos = data ?? [];
+		}
+	}
 
-      description = '';
-      files = null;
-      await loadPhotos();
-    } catch (e) {
-      console.error('uploadPhoto error:', e);
-      alert('Error al subir: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      loading = false;
-    }
-  }
+	// Subir archivo a R2 usando URL prefirmada.
+	// publicUrl la calcula y devuelve el servidor; el cliente no la arma.
+	/**
+	 * @param {File} file
+	 * @param {string} [folder]
+	 * @returns {Promise<{ publicUrl: string, key: string }>}
+	 */
+	async function putToR2(file, folder = R2_FOLDERS.post) {
+		const clientError = validateImageFile(file);
+		if (clientError) throw new Error(clientError);
 
-  /** @param {string} id */
-  async function deletePhoto(id) {
-    if (!confirm('¿Eliminar esta foto?')) return;
-    loading = true;
-    try {
-      const res = await fetch('/api/media/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ media_id: id })
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Error al eliminar');
-      await loadPhotos();
-    } catch (e) {
-      console.error('deletePhoto error:', e);
-      alert('Error al eliminar: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      loading = false;
-    }
-  }
+		return uploadToR2(file, folder, {
+			onProgress: (/** @type {number} */ percent) => (uploadProgress = percent)
+		});
+	}
 
-  /** @param {string} mediaId */
-  async function loadComments(mediaId) {
-    const { data, error } = await supabase
-      .from('comments')
-      .select('id, media_id, user_id, content, created_at, profiles (nombre)')
-      .eq('media_id', mediaId)
-      .order('created_at', { ascending: true });
+	// Subir nueva foto/video al álbum
+	async function uploadPhoto() {
+		if (!files || !files.length) {
+			return alert('Selecciona una imagen o video');
+		}
 
-    if (error) {
-      console.error('loadComments error:', error);
-      comments = { ...comments, [mediaId]: [] };
-    } else {
-      comments = { ...comments, [mediaId]: data ?? [] };
-    }
-  }
+		if (!$user?.id) {
+			return alert('Usuario no autenticado');
+		}
 
-  /** @param {string} mediaId */
-  async function addComment(mediaId) {
-    const me = $user;
-    if (!me?.id) return;
-    const text = (newComment[mediaId] || '').trim();
-    if (!text) return;
+		loading = true;
+		uploadProgress = 0;
 
-    try {
-      const { error } = await supabase.from('comments').insert({
-        media_id: mediaId,
-        user_id: me.id,
-        content: text
-      });
-      if (error) throw error;
+		const file = files[0];
 
-      newComment = { ...newComment, [mediaId]: '' };
-      await loadComments(mediaId);
-    } catch (e) {
-      console.error('addComment error:', e);
-      alert('Error al comentar: ' + (e instanceof Error ? e.message : String(e)));
-    }
-  }
+		try {
+			const { publicUrl, key } = await putToR2(file, R2_FOLDERS.post);
 
-  onMount(loadPhotos);
+			const { error: insertError } = await supabase.from('photos').insert({
+				user_id: $user.id,
+				image_url: publicUrl,
+				description,
+				filename: file.name,
+				file_key: key,
+				mime_type: file.type
+			});
+
+			if (insertError) throw insertError;
+
+			description = '';
+			files = null;
+			uploadProgress = 0;
+
+			await loadPhotos();
+		} catch (e) {
+			console.error('uploadPhoto error:', e);
+
+			const message = e instanceof Error ? e.message : String(e);
+
+			alert('Error al subir: ' + message);
+		} finally {
+			loading = false;
+			uploadProgress = 0;
+		}
+	}
+
+	// Eliminar foto/video
+	/**
+	 * @param {string} id
+	 * @param {string} url
+	 * @param {string | null | undefined} fileKey
+	 */
+	async function deletePhoto(id, url, fileKey) {
+		if (!confirm('¿Eliminar este archivo?')) return;
+
+		loading = true;
+
+		try {
+			if (fileKey) {
+				// El endpoint valida que la clave sea del usuario y de la carpeta.
+				const deleted = await deleteR2Object(fileKey, R2_FOLDERS.post);
+				if (!deleted) {
+					console.warn('Error eliminando de R2, continuando con DB');
+				}
+			}
+
+			const { error: deleteError } = await supabase.from('photos').delete().eq('id', id);
+
+			if (deleteError) throw deleteError;
+
+			await loadPhotos();
+		} catch (e) {
+			console.error('deletePhoto error:', e);
+
+			const message = e instanceof Error ? e.message : String(e);
+
+			alert('Error al eliminar: ' + message);
+		} finally {
+			loading = false;
+		}
+	}
+
+	// Cargar comentarios de una foto
+	/**
+	 * @param {string} photoId
+	 */
+	async function loadComments(photoId) {
+		const { data, error } = await supabase
+			.from('comments')
+			.select('id,photo_id,user_id,content,created_at')
+			.eq('photo_id', photoId)
+			.order('created_at', { ascending: true });
+
+		if (error) {
+			console.error('loadComments error:', error);
+
+			comments = {
+				...comments,
+				[photoId]: []
+			};
+		} else {
+			comments = {
+				...comments,
+				[photoId]: data ?? []
+			};
+		}
+	}
+
+	// Agregar comentario
+	/**
+	 * @param {string} photoId
+	 */
+	async function addComment(photoId) {
+		if (!$user?.id) {
+			return alert('Usuario no autenticado');
+		}
+
+		const text = (newComment[photoId] || '').trim();
+
+		if (!text) return;
+
+		try {
+			const { error } = await supabase.from('comments').insert({
+				photo_id: photoId,
+				user_id: $user.id,
+				content: text
+			});
+
+			if (error) throw error;
+
+			newComment = {
+				...newComment,
+				[photoId]: ''
+			};
+
+			await loadComments(photoId);
+		} catch (e) {
+			console.error('addComment error:', e);
+
+			const message = e instanceof Error ? e.message : String(e);
+
+			alert('Error al comentar: ' + message);
+		}
+	}
+
+	/**
+	 * @param {string | null | undefined} mimeType
+	 * @returns {boolean}
+	 */
+	function isVideo(mimeType) {
+		return mimeType?.startsWith('video/') ?? false;
+	}
+
+	onMount(loadPhotos);
 </script>
 
-<div class="p-6 max-w-3xl mx-auto">
-  <h2 class="text-2xl font-bold mb-4">Mis fotos</h2>
+<!-- Layout y estilos originales -->
+<div class="mx-auto max-w-3xl p-6">
+	<h2 class="mb-4 text-2xl font-bold">Mi Galería</h2>
 
-  <div class="bg-white p-4 rounded-lg shadow mb-6">
-    <input type="file" bind:files={files} multiple={false} accept="image/*,video/*" />
-    <input
-      type="text"
-      bind:value={description}
-      placeholder="Descripción"
-      class="border rounded p-2 w-full mt-2"
-    />
-    <button
-      class="bg-green-500 text-white px-4 py-2 mt-2 rounded"
-      on:click={uploadPhoto}
-      disabled={loading}
-    >
-      {loading ? 'Subiendo...' : 'Subir'}
-    </button>
-  </div>
+	<!-- Subir nuevo archivo -->
+	<div class="mb-6 rounded-lg bg-white p-4 shadow">
+		<input
+			type="file"
+			bind:files
+			multiple={false}
+			accept="image/jpeg,image/png,image/webp,image/gif"
+		/>
 
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-    {#each photos as photo}
-      <div class="bg-white p-4 rounded-lg shadow">
-        {#if photo.filename && photo.filename.match(/\.(mp4|webm|ogg|mov)$/i)}
-          <video src={photo.public_url || '/aguaenlaboca.jpeg'} controls class="w-full h-60 object-cover rounded"></video>
-        {:else}
-          <img src={photo.public_url || '/aguaenlaboca.jpeg'} alt="foto" class="w-full h-60 object-cover rounded" />
-        {/if}
-        <p class="mt-2 text-gray-700">{photo.descripcion}</p>
-        <button
-          class="bg-red-500 text-white px-3 py-1 mt-2 rounded"
-          on:click={() => deletePhoto(photo.id)}
-          disabled={loading}
-        >
-          Eliminar
-        </button>
+		<p class="mt-1 text-xs text-gray-500">
+			JPG, PNG, WEBP o GIF. Máximo {MAX_UPLOAD_BYTES / (1024 * 1024)} MB.
+		</p>
 
-        <div class="mt-4">
-          <h4 class="font-semibold">Comentarios</h4>
-          <button
-            class="text-sm text-blue-500"
-            on:click={() => loadComments(photo.id)}
-          >
-            Ver comentarios
-          </button>
+		<input
+			type="text"
+			bind:value={description}
+			placeholder="Descripción"
+			class="mt-2 w-full rounded border p-2"
+		/>
 
-          {#if comments[photo.id]}
-            {#each comments[photo.id] as c}
-              <p class="text-gray-600 text-sm border-b py-1">{c.profiles?.nombre || 'Anónimo'}: {c.content}</p>
-            {/each}
-          {/if}
+		{#if loading && uploadProgress > 0}
+			<div class="mb-2">
+				<div class="mb-1 flex justify-between text-sm">
+					<span>Subiendo...</span>
+					<span>{uploadProgress}%</span>
+				</div>
 
-          <input
-            type="text"
-            placeholder="Escribe un comentario..."
-            bind:value={newComment[photo.id]}
-            class="border rounded p-1 w-full mt-2"
-          />
-          <button
-            class="bg-green-500 text-white px-3 py-1 mt-1 rounded"
-            on:click={() => addComment(photo.id)}
-          >
-            Comentar
-          </button>
-        </div>
-      </div>
-    {/each}
-  </div>
+				<div class="h-2 w-full rounded-full bg-gray-200">
+					<div
+						class="h-2 rounded-full bg-green-500 transition-all"
+						style="width: {uploadProgress}%"
+					></div>
+				</div>
+			</div>
+		{/if}
+
+		<button
+			class="mt-2 rounded bg-green-500 px-4 py-2 text-white"
+			on:click={uploadPhoto}
+			disabled={loading}
+		>
+			{loading ? 'Subiendo...' : 'Subir'}
+		</button>
+	</div>
+
+	<!-- Mostrar fotos/videos -->
+	<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+		{#each photos as photo}
+			<div class="rounded-lg bg-white p-4 shadow">
+				{#if photo.image_url}
+					{#if isVideo(photo.mime_type)}
+						<video src={photo.image_url} controls class="h-60 w-full rounded object-cover">
+							<track kind="captions" />
+						</video>
+					{:else}
+						<img
+							src={photo.image_url}
+							alt={photo.description || 'Foto'}
+							class="h-60 w-full rounded object-cover"
+						/>
+					{/if}
+				{/if}
+
+				<p class="mt-2 text-gray-700">
+					{photo.description}
+				</p>
+
+				<button
+					class="mt-2 rounded bg-red-500 px-3 py-1 text-white"
+					on:click={() => deletePhoto(photo.id, photo.image_url, photo.file_key)}
+					disabled={loading}
+				>
+					Eliminar
+				</button>
+
+				<div class="mt-4">
+					<h4 class="font-semibold">Comentarios</h4>
+
+					<button class="text-sm text-blue-500" on:click={() => loadComments(photo.id)}>
+						Ver comentarios
+					</button>
+
+					{#if comments[photo.id]}
+						{#each comments[photo.id] as c}
+							<p class="border-b py-1 text-sm text-gray-600">
+								{c.content}
+							</p>
+						{/each}
+					{/if}
+
+					<input
+						type="text"
+						placeholder="Escribe un comentario..."
+						bind:value={newComment[photo.id]}
+						class="mt-2 w-full rounded border p-1"
+					/>
+
+					<button
+						class="mt-1 rounded bg-green-500 px-3 py-1 text-white"
+						on:click={() => addComment(photo.id)}
+					>
+						Comentar
+					</button>
+				</div>
+			</div>
+		{/each}
+	</div>
 </div>
+
+<style>
+	video {
+		max-width: 100%;
+		height: auto;
+	}
+</style>

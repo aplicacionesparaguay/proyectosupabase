@@ -1,38 +1,47 @@
-// @ts-nocheck
+import { createServerClient } from '@supabase/ssr';
 import { redirect } from '@sveltejs/kit';
-import { createSupabaseServerClient } from '$lib/server/supabase';
+import {
+	PUBLIC_SUPABASE_URL,
+	PUBLIC_SUPABASE_ANON_KEY
+} from '$env/static/public';
 
 export const handle = async ({ event, resolve }) => {
-	event.locals.supabase = createSupabaseServerClient(event.cookies);
-	event.locals.session = null;
-	event.locals.user = null;
+	event.locals.supabase = createServerClient(
+		PUBLIC_SUPABASE_URL,
+		PUBLIC_SUPABASE_ANON_KEY,
+		{
+			cookies: {
+				getAll: () => event.cookies.getAll(),
 
-	const {
-		data: { user },
-		error,
-	} = await event.locals.supabase.auth.getUser();
-	if (!error) {
-		event.locals.user = user;
-	}
+				setAll: (cookiesToSet) => {
+					cookiesToSet.forEach(({ name, value, options }) => {
+						event.cookies.set(name, value, {
+							...options,
+							path: '/'
+						});
+					});
+				}
+			}
+		}
+	);
 
-	// La sesión se resuelve acá en el servidor y viaja al cliente vía +layout.server.js,
-	// para que la UI no dependa de un fetch posterior en onMount.
-	const {
-		data: { session },
-	} = await event.locals.supabase.auth.getSession();
-	event.locals.session = session;
+	event.locals.getSession = async () => {
+		const {
+			data: { session }
+		} = await event.locals.supabase.auth.getSession();
 
-	const pathname = event.url.pathname;
+		return session;
+	};
 
-	// Usuario logueado no necesita ver login/register
-	const authPaths = ['/login', '/register'];
-	if (event.locals.user && authPaths.includes(pathname)) {
+	event.locals.session = await event.locals.getSession();
+
+	const protectedPaths = ['/login', '/register'];
+
+	if (
+		event.locals.session &&
+		protectedPaths.includes(event.url.pathname)
+	) {
 		throw redirect(302, '/');
-	}
-
-	// El panel de perfil propio requiere sesión (las vistas públicas /perfil/[id] no)
-	if (!event.locals.user && pathname === '/perfil') {
-		throw redirect(302, '/login');
 	}
 
 	return resolve(event);

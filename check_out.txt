@@ -1,0 +1,558 @@
+﻿
+> proyectone@0.0.1 check
+> svelte-kit sync && svelte-check --tsconfig ./jsconfig.json
+
+Loading svelte-check in workspace: c:\Users\Dell\Documents\svelte\proyectosupabase
+Getting Svelte diagnostics...
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\server\supabase.js[39m:21:11
+[31mError[39m: Parameter 'cookiesToSet' implicitly has an 'any' type. 
+[36m			},
+			setAll([35mcookiesToSet[36m) {
+				try {[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\server\supabase.js[39m:23:30
+[31mError[39m: Binding element 'name' implicitly has an 'any' type. 
+[36m				try {
+					cookiesToSet.forEach(({ [35mname[36m, value, options }) =>
+						cookies.set(name, value, { path: '/', ...options })[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\server\supabase.js[39m:23:36
+[31mError[39m: Binding element 'value' implicitly has an 'any' type. 
+[36m				try {
+					cookiesToSet.forEach(({ name, [35mvalue[36m, options }) =>
+						cookies.set(name, value, { path: '/', ...options })[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\server\supabase.js[39m:23:43
+[31mError[39m: Binding element 'options' implicitly has an 'any' type. 
+[36m				try {
+					cookiesToSet.forEach(({ name, value, [35moptions[36m }) =>
+						cookies.set(name, value, { path: '/', ...options })[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\stores\auth.js[39m:5:51
+[31mError[39m: Cannot find module '@supabase/supabase-js' or its corresponding type declarations. 
+[36m
+/** @type {import('svelte/store').Writable<import([35m'@supabase/supabase-js'[36m).Session | null>} */
+export const session = writable(null);[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\stores\auth.js[39m:7:51
+[31mError[39m: Cannot find module '@supabase/supabase-js' or its corresponding type declarations. 
+[36mexport const session = writable(null);
+/** @type {import('svelte/store').Writable<import([35m'@supabase/supabase-js'[36m).User | null>} */
+export const user = writable(null);[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\components\Login.svelte[39m:64:7
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m    <div>
+      [35m<label class="block text-pink-800 font-medium mb-2">Email</label>[36m
+      <input[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\components\Login.svelte[39m:76:7
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m    <div class="relative">
+      [35m<label class="block text-pink-800 font-medium mb-2">Contrase├▒a</label>[36m
+      <input[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\components\Register.svelte[39m:80:7
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m    <div>
+      [35m<label class="block text-pink-800 font-medium mb-2">Tu email</label>[36m
+      <input[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\components\Register.svelte[39m:92:7
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m    <div class="relative">
+      [35m<label class="block text-pink-800 font-medium mb-2">Contrase├▒a</label>[36m
+      <input[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\components\Register.svelte[39m:111:7
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m    <div class="relative">
+      [35m<label class="block text-pink-800 font-medium mb-2">Repetir contrase├▒a</label>[36m
+      <input[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\components\UserGallery.svelte[39m:185:11
+[33mWarn[39m: `<video>` elements must have a `<track kind="captions">`
+https://svelte.dev/e/a11y_media_has_caption (svelte)
+[36m        {#if photo.filename && photo.filename.match(/\.(mp4|webm|ogg|mov)$/i)}
+          [35m<video src={photo.public_url || '/aguaenlaboca.jpeg'} controls class="w-full h-60 object-cover rounded"></video>[36m
+        {:else}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\lib\components\UserGallery.svelte[39m:30:33
+[31mError[39m: Parameter 'p' implicitly has an 'any' type. (js)
+[36m    } else {
+      photos = (data ?? []).map([35mp[36m => ({
+        ...p,[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\+layout.svelte[39m:41:51
+[31mError[39m: Parameter 'event' implicitly has an 'any' type. (ts)
+[36m		// La sesion inicial ya llego por `data`; este es el unico listener de auth.
+		authListener = supabase.auth.onAuthStateChange(([35mevent[36m, currentSession: import('@supabase/supabase-js').Session | null) => {
+			session.set(currentSession);[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\+layout.svelte[39m:41:81
+[31mError[39m: Cannot find module '@supabase/supabase-js' or its corresponding type declarations. (ts)
+[36m		// La sesion inicial ya llego por `data`; este es el unico listener de auth.
+		authListener = supabase.auth.onAuthStateChange((event, currentSession: import([35m'@supabase/supabase-js'[36m).Session | null) => {
+			session.set(currentSession);[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\+page.svelte[39m:22:28
+[31mError[39m: Parameter 'p' implicitly has an 'any' type. (js)
+[36m
+		const ids = profiles.map([35mp[36m => p.id);[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\+page.svelte[39m:39:9
+[31mError[39m: Parameter 'p' implicitly has an 'any' type. (js)
+[36m		let lista = profiles
+			.map([35mp[36m => {
+				const userBanners = bannersByUser[p.id] || [];[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\+page.svelte[39m:54:12
+[31mError[39m: Parameter 'p' implicitly has an 'any' type. (js)
+[36m			})
+			.filter([35mp[36m => p !== null);[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:488:3
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m		<!-- Contenido clicable -->
+		[35m<div
+			class="relative h-full cursor-pointer"
+			on:click={() => selectedBanner = bannerPhotos[currentBannerIndex].public_url}
+		>
+			{#if bannerPhotos[currentBannerIndex].public_url?.match(/\.(mp4|webm|ogg|mov)$/i)}
+				<!-- VIDEO -->
+				<video
+					src={bannerPhotos[currentBannerIndex].public_url}
+					class="w-full h-full object-cover"
+					muted
+					loop
+					playsinline
+				/>
+				<!-- Play grande -->
+				<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+					<div class="bg-black/60 rounded-full p-8">
+						<svg class="w-20 h-20 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+					</div>
+				</div>
+			{:else}
+				<!-- FOTO -->
+				<img
+					src={bannerPhotos[currentBannerIndex].public_url}
+					alt="Banner"
+					class="w-full h-full object-cover"
+				/>
+			{/if}
+		</div>[36m
+	{/if}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:488:3
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m		<!-- Contenido clicable -->
+		[35m<div
+			class="relative h-full cursor-pointer"
+			on:click={() => selectedBanner = bannerPhotos[currentBannerIndex].public_url}
+		>
+			{#if bannerPhotos[currentBannerIndex].public_url?.match(/\.(mp4|webm|ogg|mov)$/i)}
+				<!-- VIDEO -->
+				<video
+					src={bannerPhotos[currentBannerIndex].public_url}
+					class="w-full h-full object-cover"
+					muted
+					loop
+					playsinline
+				/>
+				<!-- Play grande -->
+				<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+					<div class="bg-black/60 rounded-full p-8">
+						<svg class="w-20 h-20 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+					</div>
+				</div>
+			{:else}
+				<!-- FOTO -->
+				<img
+					src={bannerPhotos[currentBannerIndex].public_url}
+					alt="Banner"
+					class="w-full h-full object-cover"
+				/>
+			{/if}
+		</div>[36m
+	{/if}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:494:5
+[33mWarn[39m: Self-closing HTML tags for non-void elements are ambiguous ÔÇö use `<video ...></video>` rather than `<video ... />`
+https://svelte.dev/e/element_invalid_self_closing_tag (svelte)
+[36m				<!-- VIDEO -->
+				[35m<video
+					src={bannerPhotos[currentBannerIndex].public_url}
+					class="w-full h-full object-cover"
+					muted
+					loop
+					playsinline
+				/>[36m
+				<!-- Play grande -->[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:560:2
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m{#if selectedBanner}
+	[35m<div
+		class="fixed inset-0 bg-black/95 z-[9999] flex items-center justify-center p-4"
+		on:click={() => selectedBanner = null}
+	>
+		<div class="relative max-w-7xl w-full max-h-full">
+			<button
+				on:click|stopPropagation={() => selectedBanner = null}
+				class="absolute -top-12 right-0 text-white text-5xl hover:text-gray-300"
+			>├ù</button>
+
+			{#if selectedBanner.match(/\.(mp4|webm|ogg|mov)$/i)}
+				<video
+					src={selectedBanner}
+					controls
+					class="w-full max-h-screen rounded-2xl shadow-2xl"
+				/>
+			{:else}
+				<img
+					src={selectedBanner}
+					alt="Banner grande"
+					class="w-full max-h-screen rounded-2xl object-contain shadow-2xl"
+				/>
+			{/if}
+		</div>
+	</div>[36m
+{/if}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:560:2
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m{#if selectedBanner}
+	[35m<div
+		class="fixed inset-0 bg-black/95 z-[9999] flex items-center justify-center p-4"
+		on:click={() => selectedBanner = null}
+	>
+		<div class="relative max-w-7xl w-full max-h-full">
+			<button
+				on:click|stopPropagation={() => selectedBanner = null}
+				class="absolute -top-12 right-0 text-white text-5xl hover:text-gray-300"
+			>├ù</button>
+
+			{#if selectedBanner.match(/\.(mp4|webm|ogg|mov)$/i)}
+				<video
+					src={selectedBanner}
+					controls
+					class="w-full max-h-screen rounded-2xl shadow-2xl"
+				/>
+			{:else}
+				<img
+					src={selectedBanner}
+					alt="Banner grande"
+					class="w-full max-h-screen rounded-2xl object-contain shadow-2xl"
+				/>
+			{/if}
+		</div>
+	</div>[36m
+{/if}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:571:5
+[33mWarn[39m: `<video>` elements must have a `<track kind="captions">`
+https://svelte.dev/e/a11y_media_has_caption (svelte)
+[36m			{#if selectedBanner.match(/\.(mp4|webm|ogg|mov)$/i)}
+				[35m<video
+					src={selectedBanner}
+					controls
+					class="w-full max-h-screen rounded-2xl shadow-2xl"
+				/>[36m
+			{:else}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:571:5
+[33mWarn[39m: Self-closing HTML tags for non-void elements are ambiguous ÔÇö use `<video ...></video>` rather than `<video ... />`
+https://svelte.dev/e/element_invalid_self_closing_tag (svelte)
+[36m			{#if selectedBanner.match(/\.(mp4|webm|ogg|mov)$/i)}
+				[35m<video
+					src={selectedBanner}
+					controls
+					class="w-full max-h-screen rounded-2xl shadow-2xl"
+				/>[36m
+			{:else}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:707:9
+[33mWarn[39m: `<video>` elements must have a `<track kind="captions">`
+https://svelte.dev/e/a11y_media_has_caption (svelte)
+[36m							<div>
+								[35m<video src={preview.url} controls class="max-h-56 rounded-md border"></video>[36m
+								<div class="mt-2 text-sm text-gray-600">[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:756:8
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m						{:else}
+							[35m<img
+								src={photo.thumbnail_url || photo.public_url || '/aguaenlaboca.jpeg'}
+								alt={photo.titulo || 'Foto'}
+								class="h-full w-full rounded-lg object-cover object-fill"
+								on:click={() => openPhotoModal(photo)}
+							/>[36m
+						{/if}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:756:8
+[33mWarn[39m: Non-interactive element `<img>` should not be assigned mouse or keyboard event listeners
+https://svelte.dev/e/a11y_no_noninteractive_element_interactions (svelte)
+[36m						{:else}
+							[35m<img
+								src={photo.thumbnail_url || photo.public_url || '/aguaenlaboca.jpeg'}
+								alt={photo.titulo || 'Foto'}
+								class="h-full w-full rounded-lg object-cover object-fill"
+								on:click={() => openPhotoModal(photo)}
+							/>[36m
+						{/if}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:798:7
+[33mWarn[39m: `<video>` elements must have a `<track kind="captions">`
+https://svelte.dev/e/a11y_media_has_caption (svelte)
+[36m					{#if selectedPhoto.filename && selectedPhoto.filename.match(/\.(mp4|webm|ogg|mov)$/i)}
+						[35m<video
+							src={selectedPhoto.public_url}
+							controls
+							class="mb-4 max-h-[70vh] w-full rounded-lg object-contain"
+						></video>[36m
+					{:else}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\+page.svelte[39m:903:2
+[33mWarn[39m: Unused CSS selector ".min-h-screen"
+https://svelte.dev/e/css_unused_selector (svelte)
+[36m	/* Estilos empresariales */
+	[35m.min-h-screen[36m {
+		min-height: 100vh;[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\[id]\+page.svelte[39m:185:8
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m						{#each photos.slice(0, 4) as photo}
+							[35m<div class="group relative cursor-pointer overflow-hidden rounded-lg" on:click={() => openPhotoModal(photo)}>
+								{#if photo.tipo === 'video'}
+									<video src={photo.url} muted loop autoplay class="h-48 w-full rounded-lg object-cover brightness-75"></video>
+								{:else}
+									<img src={photo.url || photo.thumbnail_url || '/aguaenlaboca.jpeg'} alt={photo.titulo} class="h-48 w-full rounded-lg object-cover brightness-75" />
+								{/if}
+								{#if !subscribed && !isOwner}
+									<div class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition group-hover:opacity-100">
+										<span class="text-3xl text-white">Locked</span>
+									</div>
+								{/if}
+							</div>[36m
+						{/each}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\[id]\+page.svelte[39m:185:8
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m						{#each photos.slice(0, 4) as photo}
+							[35m<div class="group relative cursor-pointer overflow-hidden rounded-lg" on:click={() => openPhotoModal(photo)}>
+								{#if photo.tipo === 'video'}
+									<video src={photo.url} muted loop autoplay class="h-48 w-full rounded-lg object-cover brightness-75"></video>
+								{:else}
+									<img src={photo.url || photo.thumbnail_url || '/aguaenlaboca.jpeg'} alt={photo.titulo} class="h-48 w-full rounded-lg object-cover brightness-75" />
+								{/if}
+								{#if !subscribed && !isOwner}
+									<div class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition group-hover:opacity-100">
+										<span class="text-3xl text-white">Locked</span>
+									</div>
+								{/if}
+							</div>[36m
+						{/each}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\[id]\+page.svelte[39m:215:2
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m{#if selectedPhoto}
+	[35m<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" on:click={() => selectedPhoto = null}>
+		<div class="relative w-full max-w-4xl" on:click|stopPropagation>
+			<button on:click={() => selectedPhoto = null} class="absolute -top-12 right-0 text-3xl text-white hover:text-gray-300">├ù</button>
+
+			{#if selectedPhoto.tipo === 'video'}
+				<video src={selectedPhoto.url} controls class="w-full rounded-lg max-h-[80vh]"></video>
+			{:else}
+				<div class="group relative overflow-hidden rounded-lg">
+					<img src={selectedPhoto.url} alt={selectedPhoto.titulo}
+					     class="max-h-[80vh] w-full object-contain transition-transform duration-300 group-hover:scale-110" />
+				</div>
+			{/if}
+
+			{#if selectedPhoto.titulo || selectedPhoto.descripcion}
+				<div class="mt-4 text-center text-white">
+					{#if selectedPhoto.titulo}<h3 class="text-xl font-semibold">{selectedPhoto.titulo}</h3>{/if}
+					{#if selectedPhoto.descripcion}<p class="mt-2">{selectedPhoto.descripcion}</p>{/if}
+				</div>
+			{/if}
+		</div>
+	</div>[36m
+{/if}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\[id]\+page.svelte[39m:215:2
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m{#if selectedPhoto}
+	[35m<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" on:click={() => selectedPhoto = null}>
+		<div class="relative w-full max-w-4xl" on:click|stopPropagation>
+			<button on:click={() => selectedPhoto = null} class="absolute -top-12 right-0 text-3xl text-white hover:text-gray-300">├ù</button>
+
+			{#if selectedPhoto.tipo === 'video'}
+				<video src={selectedPhoto.url} controls class="w-full rounded-lg max-h-[80vh]"></video>
+			{:else}
+				<div class="group relative overflow-hidden rounded-lg">
+					<img src={selectedPhoto.url} alt={selectedPhoto.titulo}
+					     class="max-h-[80vh] w-full object-contain transition-transform duration-300 group-hover:scale-110" />
+				</div>
+			{/if}
+
+			{#if selectedPhoto.titulo || selectedPhoto.descripcion}
+				<div class="mt-4 text-center text-white">
+					{#if selectedPhoto.titulo}<h3 class="text-xl font-semibold">{selectedPhoto.titulo}</h3>{/if}
+					{#if selectedPhoto.descripcion}<p class="mt-2">{selectedPhoto.descripcion}</p>{/if}
+				</div>
+			{/if}
+		</div>
+	</div>[36m
+{/if}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\[id]\+page.svelte[39m:216:3
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" on:click={() => selectedPhoto = null}>
+		[35m<div class="relative w-full max-w-4xl" on:click|stopPropagation>
+			<button on:click={() => selectedPhoto = null} class="absolute -top-12 right-0 text-3xl text-white hover:text-gray-300">├ù</button>
+
+			{#if selectedPhoto.tipo === 'video'}
+				<video src={selectedPhoto.url} controls class="w-full rounded-lg max-h-[80vh]"></video>
+			{:else}
+				<div class="group relative overflow-hidden rounded-lg">
+					<img src={selectedPhoto.url} alt={selectedPhoto.titulo}
+					     class="max-h-[80vh] w-full object-contain transition-transform duration-300 group-hover:scale-110" />
+				</div>
+			{/if}
+
+			{#if selectedPhoto.titulo || selectedPhoto.descripcion}
+				<div class="mt-4 text-center text-white">
+					{#if selectedPhoto.titulo}<h3 class="text-xl font-semibold">{selectedPhoto.titulo}</h3>{/if}
+					{#if selectedPhoto.descripcion}<p class="mt-2">{selectedPhoto.descripcion}</p>{/if}
+				</div>
+			{/if}
+		</div>[36m
+	</div>[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\[id]\+page.svelte[39m:216:3
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" on:click={() => selectedPhoto = null}>
+		[35m<div class="relative w-full max-w-4xl" on:click|stopPropagation>
+			<button on:click={() => selectedPhoto = null} class="absolute -top-12 right-0 text-3xl text-white hover:text-gray-300">├ù</button>
+
+			{#if selectedPhoto.tipo === 'video'}
+				<video src={selectedPhoto.url} controls class="w-full rounded-lg max-h-[80vh]"></video>
+			{:else}
+				<div class="group relative overflow-hidden rounded-lg">
+					<img src={selectedPhoto.url} alt={selectedPhoto.titulo}
+					     class="max-h-[80vh] w-full object-contain transition-transform duration-300 group-hover:scale-110" />
+				</div>
+			{/if}
+
+			{#if selectedPhoto.titulo || selectedPhoto.descripcion}
+				<div class="mt-4 text-center text-white">
+					{#if selectedPhoto.titulo}<h3 class="text-xl font-semibold">{selectedPhoto.titulo}</h3>{/if}
+					{#if selectedPhoto.descripcion}<p class="mt-2">{selectedPhoto.descripcion}</p>{/if}
+				</div>
+			{/if}
+		</div>[36m
+	</div>[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\perfil\[id]\+page.svelte[39m:220:5
+[33mWarn[39m: `<video>` elements must have a `<track kind="captions">`
+https://svelte.dev/e/a11y_media_has_caption (svelte)
+[36m			{#if selectedPhoto.tipo === 'video'}
+				[35m<video src={selectedPhoto.url} controls class="w-full rounded-lg max-h-[80vh]"></video>[36m
+			{:else}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\register\+page.svelte[39m:8:7
+[31mError[39m: Variable 'userId' implicitly has type 'any' in some locations where its type cannot be determined. (js)
+[36m
+  let [35muserId[36m = null;[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\register\+page.svelte[39m:19:10
+[31mError[39m: Variable 'userId' implicitly has an 'any' type. (js)
+[36m    await refreshUserId();
+    if (![35muserId[36m) goto('/login'); // requiere confirmaci├│n de email
+  }[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\register\+page.svelte[39m:24:9
+[31mError[39m: Variable 'userId' implicitly has an 'any' type. (js)
+[36m<div class="flex items-center justify-center p-4">
+  {#if ![35muserId[36m}
+    <SignUp onSuccess={handleSignupSuccess} />[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\register\+page.svelte[39m:25:13
+[31mError[39m: Type '() => Promise<void>' is not assignable to type 'never'. (js)
+[36m  {#if !userId}
+    <SignUp [35monSuccess[36m={handleSignupSuccess} />
+  {:else}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\terminos\+page.svelte[39m:126:2
+[33mWarn[39m: Unused CSS selector "h2"
+https://svelte.dev/e/css_unused_selector (svelte)
+[36m
+	[35mh2[36m {
+		font-size: 1.5rem;[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\usuarios\+page.svelte[39m:24:4
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m		{#each usuarios as u}
+			[35m<li
+				class="p-3 border rounded-lg cursor-pointer hover:bg-gray-100 transition"
+				on:click={() => verPerfil(u.id)}
+			>
+				<p class="font-semibold text-green-600">{u.username}</p>
+				<p class="text-sm text-gray-600">{u.email}</p>
+				<p class="text-xs text-gray-400">Creado: {new Date(u.created_at).toLocaleString()}</p>
+			</li>[36m
+		{/each}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\usuarios\+page.svelte[39m:24:4
+[33mWarn[39m: Non-interactive element `<li>` should not be assigned mouse or keyboard event listeners
+https://svelte.dev/e/a11y_no_noninteractive_element_interactions (svelte)
+[36m		{#each usuarios as u}
+			[35m<li
+				class="p-3 border rounded-lg cursor-pointer hover:bg-gray-100 transition"
+				on:click={() => verPerfil(u.id)}
+			>
+				<p class="font-semibold text-green-600">{u.username}</p>
+				<p class="text-sm text-gray-600">{u.email}</p>
+				<p class="text-xs text-gray-400">Creado: {new Date(u.created_at).toLocaleString()}</p>
+			</li>[36m
+		{/each}[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\usuarios\+page.svelte[39m:6:6
+[31mError[39m: Variable 'usuarios' implicitly has type 'any[]' in some locations where its type cannot be determined. (js)
+[36m
+	let [35musuarios[36m = [];[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\usuarios\+page.svelte[39m:14:21
+[31mError[39m: Parameter 'id' implicitly has an 'any' type. (js)
+[36m
+	function verPerfil([35mid[36m) {
+		goto(`/usuarios/${id}`);[39m
+
+c:\Users\Dell\Documents\svelte\proyectosupabase\[32msrc\routes\usuarios\+page.svelte[39m:23:10
+[31mError[39m: Variable 'usuarios' implicitly has an 'any[]' type. (js)
+[36m	<ul class="space-y-2">
+		{#each [35musuarios[36m as u}
+			<li[39m
+
+====================================
+[31msvelte-check found 19 errors and 28 warnings in 12 files
+[39m
