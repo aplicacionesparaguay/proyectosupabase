@@ -3,52 +3,140 @@
 	import { supabase } from '$lib/supabaseClient';
 	import { session } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
+	import CreatorCard from '$lib/components/CreatorCard.svelte';
 
+	/**
+	 * @typedef {{
+	 *   id: string;
+	 *   username: string | null;
+	 *   display_name: string | null;
+	 *   role: string | null;
+	 *   is_verified: boolean | null;
+	 * }} Profile
+	 */
+
+	/**
+	 * @typedef {{
+	 *   user_id: string;
+	 *   public_url: string | null;
+	 *   orden: number | null;
+	 * }} Banner
+	 */
+
+	/**
+	 * @typedef {{
+	 *   id: string;
+	 *   nombre: string;
+	 *   username: string;
+	 *   role: string;
+	 *   is_verified: boolean;
+	 *   banners: string[];
+	 *   currentIndex: number;
+	 * }} Publicacion
+	 */
+
+	/** @type {{
+	 *   id: string;
+	 *   nombre: string;
+	 *   username: string;
+	 *   role: string;
+	 *   is_verified: boolean;
+	 *   banners: string[];
+	 *   currentIndex: number;
+	 * }[]} */
 	let publicaciones = [];
+
+	/**
+	 * Datos de las creadoras públicas, resueltos en el servidor por
+	 * src/routes/+page.server.js. Llega como prop `data.creadoras`.
+	 *
+	 * @typedef {Object} Creadora
+	 * @property {string} id
+	 * @property {string | null} displayName
+	 * @property {string | null} username
+	 * @property {string | null} city
+	 * @property {string | null} countryName
+	 * @property {string | null} photoUrl
+	 * @property {boolean} isVerified
+	 */
+
+	/** @type {{ creadoras: Creadora[] }} */
+	export let data;
+
+	$: creadoras = data?.creadoras ?? [];
+
 	$: logeado = $session !== null;
 
 	async function loadProfilesWithBanners() {
 		const { data: profiles, error: pErr } = await supabase
 			.from('profiles')
-			.select('id, nombre, fecha_nacimiento, pais, ciudad, is_online')
-			.order('nombre', { ascending: true });
+			.select('id, username, display_name, role, is_verified')
+			.order('display_name', { ascending: true });
 
-		if (pErr || !profiles?.length) {
+		if (pErr) {
+			console.error('Error cargando perfiles:', pErr);
 			publicaciones = [];
 			return;
 		}
 
-		const ids = profiles.map(p => p.id);
+		/** @type {Profile[]} */
+		const profileList = profiles ?? [];
 
-		const { data: banners } = await supabase
+		if (profileList.length === 0) {
+			publicaciones = [];
+			return;
+		}
+
+		const ids = profileList.map((p) => p.id);
+
+		const { data: banners, error: bErr } = await supabase
 			.from('user_banners')
 			.select('user_id, public_url, orden')
 			.in('user_id', ids)
-			.order('orden');
+			.order('orden', { ascending: true });
 
-		const bannersByUser = {};
-		for (const b of banners || []) {
-			if (!bannersByUser[b.user_id]) bannersByUser[b.user_id] = [];
-			bannersByUser[b.user_id].push(b.public_url);
+		if (bErr) {
+			console.error('Error cargando banners:', bErr);
 		}
 
-		let lista = profiles
-			.map(p => {
-				const userBanners = bannersByUser[p.id] || [];
-				if (userBanners.length === 0) return null;
+		/** @type {Banner[]} */
+		const bannerList = banners ?? [];
+
+		/** @type {Record<string, string[]>} */
+		const bannersByUser = {};
+
+		for (const b of bannerList) {
+			if (!bannersByUser[b.user_id]) {
+				bannersByUser[b.user_id] = [];
+			}
+
+			if (b.public_url) {
+				bannersByUser[b.user_id].push(b.public_url);
+			}
+		}
+
+		const lista = profileList
+			.map((p) => {
+				const userBanners = bannersByUser[p.id] ?? [];
+
+				if (userBanners.length === 0) {
+					return null;
+				}
 
 				return {
 					id: p.id,
-					nombre: p.nombre || 'Usuario',
-					fecha_nacimiento: p.fecha_nacimiento || null,
-					pais: p.pais || '',
-					ciudad: p.ciudad || '',
-					is_online: p.is_online || false,
+					nombre: p.display_name || p.username || 'Usuario',
+					username: p.username || '',
+					role: p.role || 'fan',
+					is_verified: p.is_verified || false,
 					banners: userBanners,
 					currentIndex: 0
 				};
 			})
-			.filter(Boolean);
+			.filter(
+				/** @returns {value is Publicacion} */
+				(value) => value !== null
+			);
 
 		// Aleatorizar
 		for (let i = lista.length - 1; i > 0; i--) {
@@ -59,30 +147,39 @@
 		publicaciones = lista;
 	}
 
+	/**
+	 * @param {{
+	 *   banners: string[];
+	 *   currentIndex: number;
+	 * }} pub
+	 */
 	function prevBanner(pub) {
-		if (!pub.banners?.length) return;
+		if (!pub.banners.length) return;
+
 		pub.currentIndex = (pub.currentIndex - 1 + pub.banners.length) % pub.banners.length;
+
 		publicaciones = publicaciones;
 	}
 
+	/**
+	 * @param {{
+	 *   banners: string[];
+	 *   currentIndex: number;
+	 * }} pub
+	 */
 	function nextBanner(pub) {
-		if (!pub.banners?.length) return;
+		if (!pub.banners.length) return;
+
 		pub.currentIndex = (pub.currentIndex + 1) % pub.banners.length;
+
 		publicaciones = publicaciones;
 	}
 
+	/**
+	 * @param {string} id
+	 */
 	function verPerfil(id) {
 		goto(`/perfil/${id}`);
-	}
-
-	function calcularEdad(fechaStr) {
-		if (!fechaStr) return '';
-		const nacimiento = new Date(fechaStr);
-		const hoy = new Date();
-		let edad = hoy.getFullYear() - nacimiento.getFullYear();
-		const m = hoy.getMonth() - nacimiento.getMonth();
-		if (m < 0 || (m === 0 && hoy.getDate() < nacimiento.getDate())) edad--;
-		return `${edad} años`;
 	}
 
 	onMount(() => {
@@ -90,87 +187,37 @@
 	});
 </script>
 
-<!-- GRID DE USUARIOS - SEXY EDITION -->
-<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 p-6 bg-black/90 min-h-screen">
+<section class="mx-auto w-full max-w-6xl px-4 py-10">
+	<h2
+		class="mb-1 bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-2xl font-bold text-transparent md:text-3xl"
+	>
+		Creadoras
+	</h2>
+	<p class="mb-6 text-sm text-pink-300">Perfiles disponibles en la plataforma.</p>
 
-	{#each publicaciones as pub}
-		<div class="relative overflow-hidden rounded-2xl bg-gradient-to-b from-pink-900/20 to-black/60 backdrop-blur-md border border-pink-800/40 shadow-2xl hover:shadow-pink-600/40 transition-all duration-500 group">
-
-			<!-- IMAGEN CON NAVEGACIÓN -->
-			<div 
-				class="relative cursor-pointer w-full aspect-[3/4]" 
-				on:click={() => verPerfil(pub.id)} 
-				role="button" 
-				tabindex="0" 
-				on:keydown={(e) => e.key === 'Enter' && verPerfil(pub.id)}
-			>
-				<img
-					src={pub.banners[pub.currentIndex]}
-					alt={`Banner de ${pub.nombre}`}
-					class="w-full h-full object-cover rounded-2xl transition-transform duration-700 group-hover:scale-110"
-				/>
-
-				<!-- Overlay sensual -->
-				<div class="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent"></div>
-
-				<!-- FLECHAS SEXY -->
-				{#if pub.banners.length > 1}
-					<button
-						class="absolute left-3 top-1/2 -translate-y-1/2 bg-white/10 backdrop-blur-md text-pink-300 rounded-full p-3 hover:bg-white/30 hover:text-white transition z-10"
-						on:click|stopPropagation={() => prevBanner(pub)}
-					>←</button>
-					<button
-						class="absolute right-3 top-1/2 -translate-y-1/2 bg-white/10 backdrop-blur-md text-pink-300 rounded-full p-3 hover:bg-white/30 hover:text-white transition z-10"
-						on:click|stopPropagation={() => nextBanner(pub)}
-					>→</button>
-				{/if}
-
-				<!-- PUNTOS INDICADORES -->
-				{#if pub.banners.length > 1}
-					<div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-10">
-						{#each pub.banners as _, i}
-							<div class={`w-2 h-2 rounded-full transition-all ${i === pub.currentIndex ? 'bg-pink-400 shadow-lg shadow-pink-400/60' : 'bg-white/40'}`}></div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-
-			<!-- INFO + PUNTO ONLINE -->
-			<div class="absolute bottom-0 left-0 right-0 p-5 text-center">
-				<div class="flex items-center justify-center gap-3">
-					<p class="text-2xl font-bold text-white drop-shadow-2xl">{pub.nombre}</p>
-					
-					<!-- PUNTO VERDE/ROJO -->
-					<div class="relative">
-						{#if pub.is_online}
-							<div class="w-4 h-4 bg-emerald-400 rounded-full shadow-lg shadow-emerald-400/60 animate-pulse"></div>
-							<div class="absolute inset-0 w-4 h-4 bg-emerald-400 rounded-full animate-ping opacity-75"></div>
-						{:else}
-							<div class="w-4 h-4 bg-red-600/80 rounded-full shadow-lg"></div>
-						{/if}
-					</div>
-				</div>
-
-				<p class="text-pink-300 text-sm mt-1">
-					{#if pub.fecha_nacimiento}{calcularEdad(pub.fecha_nacimiento)}{/if}
-					{#if pub.pais} - {pub.pais}{/if}
-					{#if pub.ciudad} ({pub.ciudad}){/if}
-				</p>
-			</div>
-		</div>
-	{/each}
-</div>
-
-<!-- MENSAJE NO LOGUEADO (sin tocar textos ni colores) -->
-{#if !logeado}
-	<p class="mt-6 text-center text-gray-600">
-		Para interactuar con los creadores debes
-		<a href="/login" class="font-semibold text-green-600">iniciar sesión</a>.
-	</p>
-{:else}
-	<div class="mt-6 text-center">
-		<p class="text-green-600">
-			¡Bienvenido, {$session?.user?.email}! Puedes interactuar con los perfiles.
+	{#if creadoras.length > 0}
+		<ul
+			class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
+		>
+			{#each creadoras as creadora (creadora.id)}
+				<li>
+					<CreatorCard
+						id={creadora.id}
+						displayName={creadora.displayName}
+						username={creadora.username}
+						city={creadora.city}
+						countryName={creadora.countryName}
+						photoUrl={creadora.photoUrl}
+						isVerified={creadora.isVerified}
+					/>
+				</li>
+			{/each}
+		</ul>
+	{:else}
+		<p
+			class="rounded-xl border border-dashed border-pink-900/40 bg-black/20 px-6 py-12 text-center text-pink-300"
+		>
+			No hay creadoras disponibles todavía.
 		</p>
-	</div>
-{/if}
+	{/if}
+</section>

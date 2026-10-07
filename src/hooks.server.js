@@ -1,14 +1,46 @@
-import { supabase } from '$lib/supabaseClient';
+import { createServerClient } from '@supabase/ssr';
 import { redirect } from '@sveltejs/kit';
+import {
+	PUBLIC_SUPABASE_URL,
+	PUBLIC_SUPABASE_ANON_KEY
+} from '$env/static/public';
 
 export const handle = async ({ event, resolve }) => {
-	const { data: { session } } = await supabase.auth.getSession();
-	event.locals.session = session;
-	event.locals.getSession = async () => session;
+	event.locals.supabase = createServerClient(
+		PUBLIC_SUPABASE_URL,
+		PUBLIC_SUPABASE_ANON_KEY,
+		{
+			cookies: {
+				getAll: () => event.cookies.getAll(),
 
-	// Si está logeado y va a login/register, redirige
+				setAll: (cookiesToSet) => {
+					cookiesToSet.forEach(({ name, value, options }) => {
+						event.cookies.set(name, value, {
+							...options,
+							path: '/'
+						});
+					});
+				}
+			}
+		}
+	);
+
+	event.locals.getSession = async () => {
+		const {
+			data: { session }
+		} = await event.locals.supabase.auth.getSession();
+
+		return session;
+	};
+
+	event.locals.session = await event.locals.getSession();
+
 	const protectedPaths = ['/login', '/register'];
-	if (session && protectedPaths.includes(event.url.pathname)) {
+
+	if (
+		event.locals.session &&
+		protectedPaths.includes(event.url.pathname)
+	) {
 		throw redirect(302, '/');
 	}
 

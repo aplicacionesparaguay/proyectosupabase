@@ -94,7 +94,17 @@ CREATE TABLE IF NOT EXISTS countries (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Insertar países de ejemplo
+-- Insertar países de ejemplo (idempotente)
+-- El objetivo de conflicto (code) REQUIERE un índice UNIQUE en
+-- countries(code). Ese constraint lo crea supabase-part3-creators.sql
+-- (countries_code_key). Correr este seed antes de esa migración
+-- falla con: "there is no unique or exclusion constraint matching
+-- the ON CONFLICT specification".
+--
+-- Antes se usaba `ON CONFLICT DO NOTHING` sin objetivo: como code
+-- no tenía ninguna restricción UNIQUE, no había conflicto que
+-- detectar y el seed insertaba las 8 filas en cada ejecución. Al
+-- repetir el archivo 3 veces quedaron 24 filas duplicadas.
 INSERT INTO countries (name, code) VALUES 
   ('Paraguay', 'PY'),
   ('Argentina', 'AR'),
@@ -104,7 +114,7 @@ INSERT INTO countries (name, code) VALUES
   ('Bolivia', 'BO'),
   ('Estados Unidos', 'US'),
   ('España', 'ES')
-ON CONFLICT DO NOTHING;
+ON CONFLICT (code) DO NOTHING;
 
 -- ============================================================
 -- ROW LEVEL SECURITY (RLS)

@@ -1,8 +1,63 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
+	import { browser } from '$app/environment';
 	import { supabase } from '$lib/supabaseClient';
 	import { session, user, logout } from '$lib/stores/auth';
 	import * as faceapi from 'face-api.js';
+	import {
+		uploadToR2,
+		deleteR2Object,
+		validateImageFile,
+		MAX_UPLOAD_BYTES,
+		R2_FOLDERS
+	} from '$lib/upload/r2Upload';
+
+	/**
+	 * Bounding box de una detección de face-api.js. El código solo usa estas
+	 * cuatro propiedades (detectFaces*, pixelateRect).
+	 * @typedef {Object} FaceBox
+	 * @property {number} x
+	 * @property {number} y
+	 * @property {number} width
+	 * @property {number} height
+	 */
+
+	/**
+	 * Vista previa previa a la subida, con las propiedades que ya usaba el
+	 * código original.
+	 * @typedef {Object} Preview
+	 * @property {'image' | 'video'} type
+	 * @property {File} file
+	 * @property {string} url
+	 * @property {FaceBox[]} detections
+	 * @property {string} filename
+	 * @property {'album' | 'banner'} uploadTarget
+	 * @property {string | null} [censoredDataUrl]
+	 * @property {HTMLCanvasElement} [thumbnailCanvas]
+	 */
+
+	/**
+	 * Fila de `user_photos` tal como la devuelve el select de loadPhotos().
+	 * @typedef {Object} Foto
+	 * @property {string} id
+	 * @property {string} public_url
+	 * @property {string | null} [thumbnail_url]
+	 * @property {string | null} [titulo]
+	 * @property {string | null} [descripcion]
+	 * @property {string | null} [storage_path]
+	 * @property {string | null} [filename]
+	 * @property {string | null} [mime_type]
+	 * @property {Comentario[]} [photo_comments]
+	 */
+
+	/**
+	 * Comentario de `photo_comments`, con el join anidado `profiles` que usa el
+	 * template.
+	 * @typedef {Object} Comentario
+	 * @property {string} [id]
+	 * @property {string} comentario
+	 * @property {{ nombre?: string | null } | null} [profiles]
+	 */
 
 	onMount(async () => {
 		console.log('🧠 Cargando modelos de face-api.js...');
@@ -21,46 +76,53 @@
 	});
 
 	// --- Estado del perfil (mantuve tus variables) ---
-	let bannerPhotos = [],
-		currentBannerIndex = 0;
-	let foto = '',
-		nombre = '',
-		email = '',
-		bio = '',
-		fecha_nacimiento = '',
-		ciudad = '',
-		pais = '';
-	let whatsapp = '',
-		twitter_url = '',
-		instagram_url = '',
-		website_url = '',
-		direccion = '';
-	let editing = false,
-		saving = false;
-	let photos = [],
-		selectedPhoto = null,
-		photoComment = '',
-		photoComments = [];
+	/** @type {string[]} */
+	let bannerPhotos = [];
+	let currentBannerIndex = 0;
+
+	let foto = '';
+	// Clave R2 del avatar actual, necesaria para poder borrarlo al reemplazarlo.
+	let previousAvatarKey = '';
+	let nombre = '';
+	let email = '';
+	let bio = '';
+
+	let editing = false;
+	let saving = false;
+
+	// --- Avatar ---
+	let avatarUploading = false;
+	let avatarError = '';
+
+	/** @type {Foto[]} */
+	let photos = [];
+	/** @type {Foto | null} */
+	let selectedPhoto = null;
+	let photoComment = '';
+	/** @type {Comentario[]} */
+	let photoComments = [];
 
 	let showMenu = false;
-	let menuRef;
-	let buttonRef;
+	/** @type {HTMLElement | null} */
+	let menuRef = null;
+	/** @type {HTMLElement | null} */
+	let buttonRef = null;
 	let bannerUrl = '';
 
 	// --- Nuevas variables para vista previa y censura ---
+	/** @type {Preview | null} */
 	let preview = null; // { type: 'image'|'video', file, url, detections:[], censoredDataUrl?:string, filename, uploadTarget }
 	let isUploadingPreview = false;
 	let uploadProgress = 0;
 	let censorFaces = true; // default when user chooses to censor in preview
 
 	// cerrar menú si click fuera
+	/**
+	 * @param {MouseEvent} event
+	 */
 	function handleClickOutside(event) {
-		if (
-			showMenu &&
-			menuRef &&
-			!menuRef.contains(event.target) &&
-			!buttonRef.contains(event.target)
-		) {
+		const target = /** @type {Node | null} */ (event.target);
+		if (showMenu && menuRef && !menuRef.contains(target) && !buttonRef?.contains(target)) {
 			showMenu = false;
 		}
 	}
@@ -89,8 +151,12 @@
 		}
 	});
 
+	// onDestroy también se ejecuta durante el render en servidor, donde `document`
+	// no existe. Sin este guard la ruta /perfil devolvía 500 en SSR.
 	onDestroy(() => {
-		document.removeEventListener('click', handleClickOutside);
+		if (browser) {
+			document.removeEventListener('click', handleClickOutside);
+		}
 	});
 
 	// sincronizar sesión a variables
@@ -103,58 +169,84 @@
 
 	async function loadProfile() {
 		if (!$session?.user) return;
+
 		const { data, error } = await supabase
 			.from('profiles')
-			.select('*')
+			.select(
+				`
+                        id,
+                        role,
+                        username,
+                        display_name,
+                        bio,
+                        avatar_key,
+                        banner_key,
+                        subscription_price,
+                        is_verified,
+                        is_banned,
+                        created_at,
+                        updated_at
+                `
+			)
 			.eq('id', $session.user.id)
 			.maybeSingle();
+
 		if (error && error.code !== 'PGRST116') {
 			console.error('Error loading profile:', error);
 			return;
 		}
+
 		if (data) {
-			nombre = data.nombre || '';
-			email = data.email || $session.user.email || '';
+			nombre =
+				data.display_name ||
+				data.username ||
+				$session.user.user_metadata?.nombre ||
+				$session.user.email?.split('@')[0] ||
+				'Usuario';
+
+			email = $session.user.email || '';
 			bio = data.bio || '';
-			foto = data.avatar_url || '';
-			fecha_nacimiento = data.fecha_nacimiento || '';
-			ciudad = data.ciudad || '';
-			pais = data.pais || '';
-			whatsapp = data.whatsapp || '';
-			twitter_url = data.twitter_url || '';
-			instagram_url = data.instagram_url || '';
-			website_url = data.website_url || '';
-			direccion = data.direccion || '';
+			foto = data.avatar_key || '';
+		} else {
+			nombre =
+				$session.user.user_metadata?.nombre || $session.user.email?.split('@')[0] || 'Usuario';
+
+			email = $session.user.email || '';
+			bio = '';
+			foto = '';
 		}
 	}
 
 	async function saveProfile() {
 		if (!$session?.user) return;
+
 		saving = true;
+
 		try {
 			const { error } = await supabase.from('profiles').upsert({
 				id: $session.user.id,
-				nombre: nombre || null,
-				email: email || null,
-				bio: bio || null,
-				avatar_url: foto || null,
-				fecha_nacimiento: fecha_nacimiento || null,
-				ciudad: ciudad || null,
-				pais: pais || null,
-				whatsapp: whatsapp || null,
-				twitter_url: twitter_url || null,
-				instagram_url: instagram_url || null,
-				website_url: website_url || null,
-				direccion: direccion || null
+				display_name: nombre || null,
+				bio: bio || '',
+				avatar_key: foto || null
 			});
-			if (error) console.error('Error saving profile:', error);
-			else {
-				// actualizar metadata en auth
-				await supabase.auth.updateUser({ data: { nombre, bio } });
-				await loadProfile();
+
+			if (error) {
+				console.error('Error saving profile:', error);
+				return;
 			}
+
+			// El email pertenece a Supabase Auth, no a profiles.
+			// Guardamos únicamente los datos que corresponden a profiles.
+			await supabase.auth.updateUser({
+				data: {
+					nombre: nombre || null,
+					bio: bio || ''
+				}
+			});
+
+			await loadProfile();
 		} catch (e) {
-			console.error(e);
+			console.error('Error saving profile:', e);
 		} finally {
 			saving = false;
 			editing = false;
@@ -172,7 +264,12 @@
 		bannerPhotos = (data || []).map((b) => b.public_url).filter(Boolean);
 	}
 
+	/**
+	 * @param {string} path
+	 * @param {string} url
+	 */
 	async function uploadBannerFile(path, url) {
+		if (!$session?.user) return;
 		// Inserta metadato en user_banners
 		const { error } = await supabase.from('user_banners').insert({
 			user_id: $session.user.id,
@@ -188,12 +285,13 @@
 	async function uploadBanner() {
 		// usa la misma lógica de preview con censura facial que el álbum
 		openFileDialog(async (file) => {
-			if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
-				alert('Solo se permiten imágenes o videos.');
+			const problem = validateImageFile(file);
+			if (problem) {
+				alert(problem);
 				return;
 			}
 			await preparePreviewFromFile(file, 'banner');
-		}, 'image/*,video/*');
+		}, 'image/*');
 	}
 
 	async function deleteCurrentBanner() {
@@ -206,21 +304,11 @@
 			.single();
 		if (error) return console.error(error);
 
-		// Eliminar de R2
+		// Eliminar de R2. Antes se enviaba la clave en `fileName` y el endpoint
+		// exigia `key`, asi que el borrado siempre fallaba con 400.
 		if (data.storage_path) {
-			const deleteResponse = await fetch('/api/upload/r2', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					fileName: data.storage_path,
-					contentType: 'application/octet-stream',
-					folder: 'banners',
-					action: 'delete',
-				}),
-			});
-			if (!deleteResponse.ok) {
-				console.warn('Error eliminando de R2, continuando con DB');
-			}
+			const deleted = await deleteR2Object(data.storage_path, R2_FOLDERS.cover);
+			if (!deleted) console.warn('Error eliminando de R2, continuando con DB');
 		}
 
 		await supabase.from('user_banners').delete().eq('id', data.id);
@@ -254,25 +342,17 @@
 		photos = data || [];
 	}
 
+	/**
+	 * @param {string} photoId
+	 */
 	async function deletePhoto(photoId) {
 		const photo = photos.find((p) => p.id === photoId);
 		if (!photo || !$session?.user) return;
 
 		// Eliminar de R2
 		if (photo.storage_path) {
-			const deleteResponse = await fetch('/api/upload/r2', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					fileName: photo.storage_path,
-					contentType: 'application/octet-stream',
-					folder: 'gallery',
-					action: 'delete',
-				}),
-			});
-			if (!deleteResponse.ok) {
-				console.warn('Error eliminando de R2, continuando con DB');
-			}
+			const deleted = await deleteR2Object(photo.storage_path, R2_FOLDERS.post);
+			if (!deleted) console.warn('Error eliminando de R2, continuando con DB');
 		}
 
 		await supabase.from('user_photos').delete().eq('id', photoId);
@@ -280,6 +360,9 @@
 		await loadPhotos();
 	}
 
+	/**
+	 * @param {Foto} photo
+	 */
 	function openPhotoModal(photo) {
 		selectedPhoto = photo;
 		photoComment = '';
@@ -303,6 +386,10 @@
 		}
 	}
 
+	/**
+	 * @param {string} photoId
+	 * @param {Partial<Pick<Foto, 'titulo' | 'descripcion'>>} updates
+	 */
 	async function updatePhotoDetails(photoId, updates) {
 		if (!$session?.user) return;
 		await supabase
@@ -316,64 +403,114 @@
 	// ------------------ Helpers de archivo, preview y upload ------------------
 
 	// abrir diálogo de archivo y devolución del File
+	/**
+	 * @param {(file: File) => void | Promise<void>} callback
+	 * @param {string} [accept]
+	 */
 	function openFileDialog(callback, accept = 'image/*,video/*') {
 		const fileInput = document.createElement('input');
 		fileInput.type = 'file';
 		fileInput.accept = accept;
 		fileInput.onchange = async (e) => {
-			const file = e.target.files[0];
+			const input = /** @type {HTMLInputElement | null} */ (e.target);
+			const file = input?.files?.[0];
 			if (!file) return;
 			await callback(file);
 		};
 		fileInput.click();
 	}
 
-	// Sube archivo a R2 usando URL prefirmada del backend
-	async function uploadToR2(file, folder = 'gallery') {
-		const response = await fetch('/api/upload/r2', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				fileName: file.name,
-				contentType: file.type,
-				folder,
-			}),
-		});
-
-		const result = await response.json();
-		if (!response.ok) throw new Error(result.error || 'Error obteniendo URL de subida');
-
-		const { signedUrl, key } = result;
-
-		return new Promise((resolve, reject) => {
-			const xhr = new XMLHttpRequest();
-
-			xhr.upload.addEventListener('progress', (e) => {
-				if (e.lengthComputable) {
-					uploadProgress = Math.round((e.loaded / e.total) * 100);
-				}
-			});
-
-			xhr.addEventListener('load', () => {
-				if (xhr.status >= 200 && xhr.status < 300) {
-					const publicUrl = `${import.meta.env.VITE_R2_PUBLIC_URL}/${key}`;
-					resolve({ publicUrl, key });
-				} else {
-					reject(new Error(`Error subiendo a R2: ${xhr.status} ${xhr.statusText}`));
-				}
-			});
-
-			xhr.addEventListener('error', () => reject(new Error('Error de red subiendo a R2')));
-			xhr.addEventListener('abort', () => reject(new Error('Subida cancelada')));
-
-			xhr.open('PUT', signedUrl);
-			xhr.setRequestHeader('Content-Type', file.type);
-			xhr.send(file);
+	// Sube archivo a R2 usando la URL prefirmada del backend.
+	// La publicUrl la calcula y devuelve el servidor: el cliente nunca la arma.
+	/**
+	 * @param {File} file
+	 * @param {string} folder una de R2_FOLDERS
+	 * @returns {Promise<{ publicUrl: string, key: string }>}
+	 */
+	async function putToR2(file, folder) {
+		return uploadToR2(file, folder, {
+			onProgress: (percent) => (uploadProgress = percent)
 		});
 	}
 
+	// ------------------ AVATAR ------------------
+
+	/**
+	 * Sube el avatar. Sin preview ni censura facial: pixelar el rostro
+	 * anularia el proposito de una foto de perfil.
+	 */
+	function uploadAvatar() {
+		if (!$session?.user) return;
+
+		openFileDialog(async (file) => {
+			avatarError = '';
+			avatarUploading = true;
+
+			try {
+				const clientError = validateImageFile(file);
+				if (clientError) throw new Error(clientError);
+
+				const { publicUrl, key } = await putToR2(file, R2_FOLDERS.avatar);
+
+				const { error } = await supabase
+					.from('profiles')
+					.update({ avatar_key: publicUrl })
+					.eq('id', $session.user.id);
+
+				if (error) throw error;
+
+				foto = publicUrl;
+
+				// La clave anterior solo se borra si es nuestra y del bucket publico.
+				// El endpoint devuelve 403 ante cualquier otra cosa, asi que es seguro.
+				const previousKey = previousAvatarKey;
+				previousAvatarKey = key;
+
+				if (previousKey && previousKey !== key) {
+					await deleteR2Object(previousKey, R2_FOLDERS.avatar);
+				}
+			} catch (e) {
+				avatarError = e instanceof Error ? e.message : String(e);
+				console.error('Error subiendo avatar:', e);
+			} finally {
+				avatarUploading = false;
+			}
+		});
+	}
+
+	/** Quita el avatar: borra de R2 y limpia profiles.avatar_key. */
+	async function removeAvatar() {
+		if (!$session?.user || !foto) return;
+
+		const key = previousAvatarKey;
+
+		foto = '';
+		previousAvatarKey = '';
+		avatarError = '';
+
+		const { error } = await supabase
+			.from('profiles')
+			.update({ avatar_key: null })
+			.eq('id', $session.user.id);
+
+		if (error) {
+			avatarError = error.message;
+			return;
+		}
+
+		if (key) {
+			await deleteR2Object(key, R2_FOLDERS.avatar);
+		}
+	}
+
 	// sube un File a storage en bucket dado; retorna { path, url } - MANTENIDO POR COMPATIBILIDAD
+	/**
+	 * @param {File} file
+	 * @param {string} bucket
+	 * @returns {Promise<{ path: string, url: string }>}
+	 */
 	async function uploadToStorage(file, bucket) {
+		if (!$session?.user) throw new Error('No hay sesión para subir a storage');
 		const filename = `${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
 		const path = `${$session.user.id}/${filename}`;
 		const { data, error } = await supabase.storage
@@ -386,6 +523,10 @@
 
 	// --- CREAR PREVIEW antes de subir (imagen o video) ---
 	// uploadTarget: 'album' | 'banner'
+	/**
+	 * @param {File} file
+	 * @param {'album' | 'banner'} [uploadTarget]
+	 */
 	async function preparePreviewFromFile(file, uploadTarget = 'album') {
 		preview = null;
 		const type = file.type.startsWith('video/') ? 'video' : 'image';
@@ -426,15 +567,15 @@
 	// función para abrir diálogo y crear preview (usada por botón "Agregar Foto/Video")
 	async function handleAddMedia() {
 		openFileDialog(async (file) => {
-			// permitir imagen o video
-			if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
-				alert('Solo se permiten imágenes o videos.');
+			const problem = validateImageFile(file);
+			if (problem) {
+				alert(problem);
 				return;
 			}
 			await preparePreviewFromFile(file);
 			// ahora preview contiene url / censoredDataUrl / detections
 			// usuario puede decidir "Subir" o "Cancelar" y si quiere subir censurado o no
-		}, 'image/*,video/*');
+		}, 'image/*');
 	}
 
 	// subir la preview a R2 (imagen o video) con censura facial opcional
@@ -444,14 +585,17 @@
 		isUploadingPreview = true;
 		try {
 			const target = preview.uploadTarget || 'album';
-			const folder = target === 'banner' ? 'banners' : 'gallery';
+			const folder = target === 'banner' ? R2_FOLDERS.cover : R2_FOLDERS.post;
 
 			if (preview.type === 'image') {
-				const fileToUpload = (confirmCensor && preview.censoredDataUrl)
-					? new File([dataURLtoBlob(preview.censoredDataUrl)], preview.filename, { type: 'image/png' })
-					: preview.file;
+				const fileToUpload =
+					confirmCensor && preview.censoredDataUrl
+						? new File([dataURLtoBlob(preview.censoredDataUrl)], preview.filename, {
+								type: 'image/png'
+							})
+						: preview.file;
 
-				const { publicUrl, key } = await uploadToR2(fileToUpload, folder);
+				const { publicUrl, key } = await putToR2(fileToUpload, folder);
 
 				if (target === 'banner') {
 					// Guardar en user_banners
@@ -479,14 +623,14 @@
 				}
 			} else {
 				// video: subir video original a R2
-				const { publicUrl: videoUrl, key: videoKey } = await uploadToR2(preview.file, folder);
+				const { publicUrl: videoUrl, key: videoKey } = await putToR2(preview.file, folder);
 
 				let thumbnailUrl = null;
 				if (confirmCensor && preview.censoredDataUrl) {
 					// Subir thumbnail censurado a R2
 					const blob = dataURLtoBlob(preview.censoredDataUrl);
 					const thumbName = `thumb-${preview.filename}.png`;
-					const { publicUrl: thumbUrl } = await uploadToR2(
+					const { publicUrl: thumbUrl } = await putToR2(
 						new File([blob], thumbName, { type: 'image/png' }),
 						folder
 					);
@@ -536,6 +680,10 @@
 
 	// ------------------ UTIL: cargar imagen / video / detectar caras / pixelar ------------------
 
+	/**
+	 * @param {string} url
+	 * @returns {Promise<HTMLImageElement>}
+	 */
 	function loadImage(url) {
 		return new Promise((resolve, reject) => {
 			const img = new Image();
@@ -546,6 +694,11 @@
 		});
 	}
 
+	/**
+	 * @param {string} videoUrl
+	 * @param {number} [seekTime]
+	 * @returns {Promise<HTMLCanvasElement>}
+	 */
 	async function captureVideoFirstFrame(videoUrl, seekTime = 0.1) {
 		return new Promise((resolve, reject) => {
 			const video = document.createElement('video');
@@ -564,6 +717,10 @@
 						canvas.width = video.videoWidth;
 						canvas.height = video.videoHeight;
 						const ctx = canvas.getContext('2d');
+						if (!ctx) {
+							reject(new Error('No se pudo obtener el contexto 2D del canvas'));
+							return;
+						}
 						ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 						// cleanup
 						video.pause();
@@ -584,6 +741,10 @@
 	}
 
 	// detect faces en un elemento image (HTMLImageElement)
+	/**
+	 * @param {HTMLImageElement} imgEl
+	 * @returns {Promise<FaceBox[]>}
+	 */
 	async function detectFacesImageElement(imgEl) {
 		try {
 			const detections = await faceapi.detectAllFaces(imgEl, new faceapi.TinyFaceDetectorOptions());
@@ -596,6 +757,10 @@
 	}
 
 	// detect faces en canvas
+	/**
+	 * @param {HTMLCanvasElement} canvasEl
+	 * @returns {Promise<FaceBox[]>}
+	 */
 	async function detectFacesCanvas(canvasEl) {
 		try {
 			const detections = await faceapi.detectAllFaces(
@@ -610,11 +775,18 @@
 	}
 
 	// DETECCIÓN: crea canvas pixelado y devuelve dataURL (imagen PNG)
+	/**
+	 * @param {HTMLImageElement} imgEl
+	 * @param {FaceBox[]} boxes
+	 * @param {number} [pixelSize]
+	 * @returns {string}
+	 */
 	function pixelateImageElement(imgEl, boxes, pixelSize = 10) {
 		const canvas = document.createElement('canvas');
 		canvas.width = imgEl.naturalWidth || imgEl.width;
 		canvas.height = imgEl.naturalHeight || imgEl.height;
 		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('No se pudo obtener el contexto 2D del canvas');
 		ctx.drawImage(imgEl, 0, 0);
 		// pixelate each box
 		boxes.forEach((box) => {
@@ -623,11 +795,18 @@
 		return canvas.toDataURL('image/png');
 	}
 
+	/**
+	 * @param {HTMLCanvasElement} canvasEl
+	 * @param {FaceBox[]} boxes
+	 * @param {number} [pixelSize]
+	 * @returns {string}
+	 */
 	function pixelateCanvas(canvasEl, boxes, pixelSize = 10) {
 		const canvas = document.createElement('canvas');
 		canvas.width = canvasEl.width;
 		canvas.height = canvasEl.height;
 		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('No se pudo obtener el contexto 2D del canvas');
 		ctx.drawImage(canvasEl, 0, 0);
 		boxes.forEach((box) => {
 			pixelateRect(ctx, box.x, box.y, box.width, box.height, pixelSize);
@@ -636,6 +815,14 @@
 	}
 
 	// pixelateRect helper: reduce resolution of rect and scale back
+	/**
+	 * @param {CanvasRenderingContext2D} ctx
+	 * @param {number} x
+	 * @param {number} y
+	 * @param {number} w
+	 * @param {number} h
+	 * @param {number} pixelSize
+	 */
 	function pixelateRect(ctx, x, y, w, h, pixelSize) {
 		// clamp
 		x = Math.max(0, Math.floor(x));
@@ -647,6 +834,7 @@
 		tmp.width = w;
 		tmp.height = h;
 		const tctx = tmp.getContext('2d');
+		if (!tctx) throw new Error('No se pudo obtener el contexto 2D del canvas temporal');
 		tctx.drawImage(ctx.canvas, x, y, w, h, 0, 0, w, h);
 		// scale down
 		const sw = Math.max(1, Math.floor(w / pixelSize));
@@ -655,6 +843,7 @@
 		small.width = sw;
 		small.height = sh;
 		const sctx = small.getContext('2d');
+		if (!sctx) throw new Error('No se pudo obtener el contexto 2D del canvas reducido');
 		sctx.imageSmoothingEnabled = false;
 		sctx.drawImage(tmp, 0, 0, w, h, 0, 0, sw, sh);
 		// scale back up
@@ -666,9 +855,13 @@
 	}
 
 	// convierte dataURL a Blob
+	/**
+	 * @param {string} dataurl
+	 * @returns {Blob}
+	 */
 	function dataURLtoBlob(dataurl) {
 		const arr = dataurl.split(',');
-		const mime = arr[0].match(/:(.*?);/)[1];
+		const mime = /** @type {string} */ (arr[0].match(/:(.*?);/)?.[1] ?? '');
 		const bstr = atob(arr[1]);
 		let n = bstr.length;
 		const u8arr = new Uint8Array(n);
@@ -680,8 +873,10 @@
 	async function uploadFileDirect() {
 		openFileDialog(async (file) => {
 			if (!file) return;
-			if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
-				alert('Solo se permiten imágenes o videos.');
+			if (!$session?.user) return;
+			const problem = validateImageFile(file);
+			if (problem) {
+				alert(problem);
 				return;
 			}
 
@@ -700,7 +895,7 @@
 			}
 
 			// Subir a R2
-			const { publicUrl, key } = await uploadToR2(fileToUpload, 'gallery');
+			const { publicUrl, key } = await putToR2(fileToUpload, R2_FOLDERS.post);
 
 			await supabase.from('user_photos').insert({
 				user_id: $session.user.id,
@@ -713,12 +908,12 @@
 				mime_type: fileToUpload.type
 			});
 			await loadPhotos();
-		}, 'image/*,video/*');
+		}, 'image/*');
 	}
 </script>
 
 <!-- Banner -->
-<div class="w-full relative h-64">
+<div class="relative h-64 w-full">
 	{#if bannerPhotos.length > 0}
 		<img
 			src={bannerPhotos[currentBannerIndex]}
@@ -727,7 +922,13 @@
 		/>
 	{:else}
 		<div class="absolute inset-0 flex items-center justify-center bg-gray-700 text-white">
-			Cargar Banner
+			<button
+				type="button"
+				on:click={uploadBanner}
+				class="rounded-lg bg-white/20 px-4 py-2 font-medium hover:bg-white/30"
+			>
+				Cargar portada
+			</button>
 		</div>
 	{/if}
 
@@ -771,7 +972,7 @@
 							showMenu = false;
 							uploadBanner();
 						}}
-						class="block w-full px-4 py-2 text-left hover:bg-gray-100">⬆️ Subir Banner</button
+						class="block w-full px-4 py-2 text-left hover:bg-gray-100">⬆️ Subir Portada</button
 					>
 					<button
 						on:click={() => {
@@ -807,30 +1008,79 @@
 		</button>
 
 		<!-- Header -->
-		<div class="mb-8 text-center">
-			<h1 class="mb-2 text-3xl font-bold text-gray-900 md:text-4xl">
-				{#if editing}
-					<input
-						bind:value={nombre}
-						class="w-full max-w-md border-b-2 border-blue-500 bg-transparent text-center text-3xl font-bold focus:outline-none"
-						placeholder="Tu nombre"
+		<div class="mb-8 flex flex-col items-center gap-4 text-center sm:flex-row sm:text-left">
+			<!-- Avatar -->
+			<div class="relative shrink-0">
+				{#if foto}
+					<img
+						src={foto}
+						alt="Tu foto de perfil"
+						class="h-24 w-24 rounded-full border border-gray-200 object-cover shadow"
 					/>
 				{:else}
-					{nombre}
+					<div
+						class="flex h-24 w-24 items-center justify-center rounded-full border-2 border-dashed border-gray-300 bg-gray-100 text-3xl font-bold text-gray-400"
+						aria-hidden="true"
+					>
+						{nombre.slice(0, 1).toUpperCase()}
+					</div>
 				{/if}
-			</h1>
-			<p class="mb-1 text-lg text-gray-600">
-				{#if editing}
-					<input
-						bind:value={email}
-						type="email"
-						class="w-full max-w-sm border-b border-gray-300 bg-transparent text-center focus:border-blue-500 focus:outline-none"
-						placeholder="Tu email"
-					/>
-				{:else}
+
+				{#if avatarUploading}
+					<div
+						class="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-xs font-medium text-white"
+					>
+						{uploadProgress}%
+					</div>
+				{/if}
+			</div>
+
+			<div class="min-w-0 flex-1">
+				<h1 class="mb-2 text-3xl font-bold text-gray-900 md:text-4xl">
+					{#if editing}
+						<input
+							bind:value={nombre}
+							class="w-full max-w-md border-b-2 border-blue-500 bg-transparent text-center text-3xl font-bold focus:outline-none"
+							placeholder="Tu nombre"
+						/>
+					{:else}
+						{nombre}
+					{/if}
+				</h1>
+				<p class="mb-1 text-lg text-gray-600">
 					{email}
+				</p>
+
+				<div class="mt-3 flex flex-wrap justify-center gap-2 sm:justify-start">
+					<button
+						type="button"
+						on:click={uploadAvatar}
+						disabled={avatarUploading}
+						class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+					>
+						{avatarUploading ? 'Subiendo...' : foto ? 'Cambiar foto' : 'Subir foto'}
+					</button>
+
+					{#if foto}
+						<button
+							type="button"
+							on:click={removeAvatar}
+							disabled={avatarUploading}
+							class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50"
+						>
+							Quitar foto
+						</button>
+					{/if}
+				</div>
+
+				{#if avatarError}
+					<p class="mt-2 text-sm text-red-600">{avatarError}</p>
 				{/if}
-			</p>
+
+				<p class="mt-2 text-xs text-gray-500">
+					JPG, PNG, WEBP o GIF. Máximo {MAX_UPLOAD_BYTES / (1024 * 1024)} MB.
+				</p>
+			</div>
 		</div>
 
 		<!-- Bio -->
@@ -861,8 +1111,7 @@
 			<div class="mb-4 flex gap-3">
 				<button
 					on:click={handleAddMedia}
-					class="rounded-lg bg-blue-600 px-6 py-2 text-white hover:bg-blue-700"
-					>Agregar Foto/Video</button
+					class="rounded-lg bg-blue-600 px-6 py-2 text-white hover:bg-blue-700">Agregar Foto</button
 				>
 				<button
 					on:click={uploadFileDirect}
@@ -874,16 +1123,22 @@
 			<!-- PREVIEW antes de subir -->
 			{#if preview}
 				<div class="mb-6 rounded-lg border bg-gray-50 p-4">
-					<h3 class="mb-2 font-semibold">Vista previa — {preview.filename} {preview.uploadTarget === 'banner' ? '(Banner)' : '(Álbum)'}</h3>
+					<h3 class="mb-2 font-semibold">
+						Vista previa — {preview.filename}
+						{preview.uploadTarget === 'banner' ? '(Banner)' : '(Álbum)'}
+					</h3>
 
 					{#if isUploadingPreview && uploadProgress > 0}
 						<div class="mb-4">
-							<div class="flex justify-between text-sm mb-1">
+							<div class="mb-1 flex justify-between text-sm">
 								<span>Subiendo a R2...</span>
 								<span>{uploadProgress}%</span>
 							</div>
-							<div class="w-full bg-gray-200 rounded-full h-2">
-								<div class="bg-green-500 h-2 rounded-full transition-all" style="width: {uploadProgress}%"></div>
+							<div class="h-2 w-full rounded-full bg-gray-200">
+								<div
+									class="h-2 rounded-full bg-green-500 transition-all"
+									style="width: {uploadProgress}%"
+								></div>
 							</div>
 						</div>
 					{/if}
@@ -968,7 +1223,6 @@
 							</div>
 						{:else}
 							<img
-								type="image"
 								src={photo.thumbnail_url ?? photo.public_url}
 								alt={photo.titulo || 'Foto'}
 								class="h-full w-full rounded-lg object-cover object-fill"
@@ -1032,6 +1286,7 @@
 								placeholder="Título"
 								class="w-full rounded-lg border border-gray-300 px-3 py-2"
 								on:input={() =>
+									selectedPhoto &&
 									updatePhotoDetails(selectedPhoto.id, { titulo: selectedPhoto.titulo })}
 							/>
 							<textarea
@@ -1040,6 +1295,7 @@
 								rows="3"
 								class="w-full rounded-lg border border-gray-300 px-3 py-2"
 								on:input={() =>
+									selectedPhoto &&
 									updatePhotoDetails(selectedPhoto.id, { descripcion: selectedPhoto.descripcion })}
 							></textarea>
 						{:else}
