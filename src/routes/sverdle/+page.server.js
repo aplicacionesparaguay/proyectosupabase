@@ -1,4 +1,4 @@
-	import { fail } from '@sveltejs/kit';
+import { fail } from '@sveltejs/kit';
 import { Game } from './game';
 
 /** @satisfies {import('./$types').PageServerLoad} */

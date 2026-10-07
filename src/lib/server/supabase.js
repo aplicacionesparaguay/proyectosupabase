@@ -1,19 +1,14 @@
 // src/lib/server/supabase.js
 // Cliente de Supabase para el servidor (usa cookies HTTP).
+// Las variables PUBLIC_* son seguras para el servidor Y el navegador.
 import { createServerClient } from '@supabase/ssr';
-
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-	throw new Error('Missing Supabase server environment variables.');
-}
+import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 
 /**
  * @param {import('@sveltejs/kit').Cookies} cookies
  */
 export function createSupabaseServerClient(cookies) {
-	return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+	return createServerClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
 		cookies: {
 			getAll() {
 				return cookies.getAll();
@@ -27,7 +22,7 @@ export function createSupabaseServerClient(cookies) {
 					// Llamado desde un componente de servidor sin respuesta:
 					// se puede ignorar, la sesión se refresca con `getUser()`.
 				}
-			},
-		},
+			}
+		}
 	});
 }

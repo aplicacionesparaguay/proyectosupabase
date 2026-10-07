@@ -85,14 +85,16 @@
 	});
 </script>
 
-<div class="mx-auto mt-32 w-full max-w-md rounded-2xl bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 p-8 text-center shadow-2xl border border-pink-200">
+<div
+	class="mx-auto mt-32 w-full max-w-md rounded-2xl border border-pink-200 bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 p-8 text-center shadow-2xl"
+>
 	{#if error}
 		<h2 class="mb-4 text-2xl font-bold text-pink-900">No pudimos entrar</h2>
-		<p class="mb-6 rounded-lg bg-red-100 p-4 text-red-700 border border-red-300">{error}</p>
+		<p class="mb-6 rounded-lg border border-red-300 bg-red-100 p-4 text-red-700">{error}</p>
 		<div class="flex gap-3">
 			<a
 				href="/login"
-				class="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-fuchsia-600 py-3 font-bold text-white shadow-lg hover:from-pink-700 hover:to-fuchsia-700 transition"
+				class="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-fuchsia-600 py-3 font-bold text-white shadow-lg transition hover:from-pink-700 hover:to-fuchsia-700"
 			>
 				Iniciar sesión
 			</a>

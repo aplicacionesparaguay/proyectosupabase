@@ -2,7 +2,7 @@
 // Genera una URL firmada para subir un archivo directo a R2.
 // El navegador recibe { uploadUrl } y hace el PUT; luego inserta la fila en `media`.
 import { json } from '@sveltejs/kit';
-import { randomUUID } from 'node:crypto';
+
 import { createPresignedUpload, publicUrl } from '$lib/server/r2';
 
 const TIPOS = ['avatar', 'banner', 'photo', 'video'];
@@ -27,8 +27,10 @@ export async function POST({ request, locals }) {
 	}
 
 	const bucket = es_privado ? 'private' : 'public';
-	const safeName = String(filename).replace(/[^a-zA-Z0-9._-]/g, '-').slice(-80);
-	const storageKey = `${locals.user.id}/${randomUUID()}-${safeName}`;
+	const safeName = String(filename)
+		.replace(/[^a-zA-Z0-9._-]/g, '-')
+		.slice(-80);
+	const storageKey = `${locals.user.id}/${crypto.randomUUID()}-${safeName}`;
 
 	try {
 		const uploadUrl = await createPresignedUpload(storageKey, bucket, contentType);
@@ -36,10 +38,13 @@ export async function POST({ request, locals }) {
 			storage_key: storageKey,
 			bucket,
 			upload_url: uploadUrl,
-			public_url: bucket === 'public' ? publicUrl(storageKey) : null,
+			public_url: bucket === 'public' ? publicUrl(storageKey) : null
 		});
 	} catch (e) {
 		console.error('upload presign error:', e);
-		return json({ error: e instanceof Error ? e.message : 'Error generando URL de subida' }, { status: 500 });
+		return json(
+			{ error: e instanceof Error ? e.message : 'Error generando URL de subida' },
+			{ status: 500 }
+		);
 	}
 }

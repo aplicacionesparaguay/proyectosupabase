@@ -2,285 +2,341 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { supabase } from '$lib/supabaseClient';
+	import { user } from '$lib/stores/auth';
+	import MediaGrid from '$lib/components/MediaGrid.svelte';
+	import FollowButton from '$lib/components/FollowButton.svelte';
+	import SubscribeButton from '$lib/components/SubscribeButton.svelte';
 
 	/**
-	 * Perfil público, tal como lo devuelve el select de este archivo.
 	 * @typedef {Object} Perfil
 	 * @property {string} id
-	 * @property {string | null} [role]
-	 * @property {string | null} [username]
-	 * @property {string | null} [display_name]
-	 * @property {string | null} [bio]
-	 * @property {string | null} [avatar_key]
-	 * @property {string | null} [banner_key]
-	 * @property {boolean | null} [is_verified]
-	 * @property {string | null} [created_at]
-	 * @property {string | null} [updated_at]
-	 */
-
-	/**
-	 * @typedef {Object} Banner
-	 * @property {string | null} public_url
-	 * @property {number | null} [orden]
-	 */
-
-	/**
-	 * Foto del álbum con el discriminante `tipo` que añade el `.map()`.
-	 * @typedef {Object} Foto
-	 * @property {string} id
-	 * @property {string} public_url
-	 * @property {string | null} [titulo]
-	 * @property {string | null} [descripcion]
-	 * @property {'video' | 'image'} tipo
+	 * @property {string | null} role
+	 * @property {string | null} username
+	 * @property {string | null} display_name
+	 * @property {string | null} bio
+	 * @property {string | null} avatar_key
+	 * @property {string | null} banner_key
+	 * @property {number | null} subscription_price
+	 * @property {boolean | null} is_verified
+	 * @property {string | null} city
+	 * @property {string | null} country_code
+	 * @property {number} followers_count
+	 * @property {number} media_count
 	 */
 
 	/** @type {Perfil | null} */
-	let user = null;
-	/** @type {Banner[]} */
+	/** @type {any} */
+	let profile = null;
+	/** @type {any[]} */
 	let banners = [];
 	let currentBannerIndex = 0;
-	/** @type {Foto[]} */
-	let photos = [];
-	/** @type {Foto | null} */
-	let selectedPhoto = null;
+	/** @type {any[]} */
+	let mediaItems = [];
 	let loading = true;
 	/** @type {string | null} */
 	let error = null;
+	let isSubscribed = false;
+	let isOwnProfile = false;
+	let activeTab = 'publico';
+
+	/** @type {string} */
+	let profileId;
+	$: profileId = $page.params.id ?? '';
 
 	onMount(async () => {
 		try {
-			const id = $page.params.id;
-
-			const { data: profile, error: pErr } = await supabase
+			const { data: p, error: pErr } = await supabase
 				.from('profiles')
 				.select(
-					`
-                id,
-                role,
-                username,
-                display_name,
-                bio,
-                avatar_key,
-                banner_key,
-                subscription_price,
-                is_verified,
-                is_banned,
-                created_at,
-                updated_at
-        `
+					'id, role, username, display_name, bio, avatar_key, banner_key, subscription_price, is_verified, city, country_code, followers_count, following_count, media_count'
 				)
-				.eq('id', id)
+				.eq('id', profileId)
 				.single();
 
-			if (pErr || !profile) throw pErr || new Error('Perfil no encontrado');
-			user = profile;
+			if (pErr || !p) throw new Error('Perfil no encontrado');
+			profile = /** @type {any} */ (p);
 
-			const { data: bData } = await supabase
-				.from('user_banners')
+			isOwnProfile = $user?.id === profileId;
+
+			// Verificar suscripción
+			if ($user && !isOwnProfile) {
+				const { data: sub } = await supabase
+					.from('media_subscriptions')
+					.select('id, status')
+					.eq('creator_id', profileId)
+					.eq('subscriber_id', $user?.id)
+					.maybeSingle();
+				isSubscribed = sub?.status === 'activa';
+			}
+
+			// Cargar banners (media tipo banner, público)
+			const { data: bannerData } = await supabase
+				.from('media')
 				.select('public_url, orden')
-				.eq('user_id', id)
+				.eq('user_id', profileId)
+				.eq('tipo', 'banner')
 				.order('orden', { ascending: true });
-			banners = bData || [];
+			banners = bannerData ?? [];
 
-			const { data: phData, error: phErr } = await supabase
-				.from('user_photos')
-				.select('id, public_url, titulo, descripcion')
-				.eq('user_id', id)
-				.order('orden', { ascending: true });
-
-			if (phErr) console.error('Error photos:', phErr);
-			photos = (phData || []).map((p) => ({
-				...p,
-				tipo: /\.(mp4|webm|ogg)$/i.test(p.public_url) ? 'video' : 'image'
-			}));
+			// Cargar contenido
+			await loadMedia();
 		} catch (err) {
-			console.error('Load error:', err);
 			error = err instanceof Error ? err.message : String(err);
 		} finally {
 			loading = false;
 		}
 	});
 
-	const prevBanner = () => {
-		if (banners.length > 1) {
-			currentBannerIndex = (currentBannerIndex - 1 + banners.length) % banners.length;
+	async function loadMedia() {
+		let query = supabase
+			.from('media')
+			.select(
+				`id, user_id, tipo, public_url, storage_key, titulo, descripcion,
+				 es_privado, bucket, orden, created_at,
+				 media_likes(count),
+				 media_comments(count)`
+			)
+			.eq('user_id', profileId)
+			.eq('tipo', 'photo')
+			.order('created_at', { ascending: false });
+
+		if (!isOwnProfile && !isSubscribed) {
+			query = query.eq('es_privado', false);
 		}
+
+		const { data } = await query;
+		mediaItems = (data ?? []).map((m) => ({
+			...m,
+			like_count: m.media_likes?.[0]?.count ?? 0,
+			comment_count: m.media_comments?.[0]?.count ?? 0
+		}));
+	}
+
+	$: publicItems = mediaItems.filter((m) => !m.es_privado);
+	$: privateItems = mediaItems.filter((m) => m.es_privado);
+	$: canSeePrivate = isOwnProfile || isSubscribed;
+
+	const prevBanner = () => {
+		if (banners.length > 1)
+			currentBannerIndex = (currentBannerIndex - 1 + banners.length) % banners.length;
 	};
 	const nextBanner = () => {
-		if (banners.length > 1) {
-			currentBannerIndex = (currentBannerIndex + 1) % banners.length;
-		}
+		if (banners.length > 1) currentBannerIndex = (currentBannerIndex + 1) % banners.length;
 	};
 
-	const showPaywall = () => {
-		alert('Este contenido está bloqueado. ¡Paga para desbloquear el álbum completo!');
-	};
+	/** @param {string | null | undefined} name */
+	function getInitials(name) {
+		return (
+			name
+				?.split(/\s+/)
+				.filter(Boolean)
+				.slice(0, 2)
+				.map((p) => p[0].toUpperCase())
+				.join('') ?? '?'
+		);
+	}
 </script>
 
 {#if loading}
-	<p class="mt-20 text-center text-gray-600">Cargando...</p>
-{:else if error}
-	<p class="mt-20 text-center text-red-600">Error: {error}</p>
-{:else if !user}
-	<p class="mt-20 text-center text-red-600">Perfil no encontrado.</p>
+	<div class="flex min-h-[60vh] items-center justify-center">
+		<div
+			class="h-10 w-10 animate-spin rounded-full border-2 border-pink-500 border-t-transparent"
+		></div>
+	</div>
+{:else if error || !profile}
+	<div class="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+		<p class="text-xl text-pink-300">{error ?? 'Perfil no encontrado'}</p>
+		<a href="/" class="text-sm text-pink-400 underline">Volver al inicio</a>
+	</div>
 {:else}
-	<div class="mx-auto max-w-6xl px-4 py-8">
-		<div class="rounded-xl border border-gray-200 bg-white p-6 shadow-lg md:p-8">
-			<!-- BANNER -->
-			<div class="relative mb-6 h-64 w-full overflow-hidden rounded-xl bg-gray-900">
-				{#if banners.length}
-					<img
-						src={banners[currentBannerIndex].public_url}
-						alt="Banner"
-						class="absolute inset-0 h-full w-full object-cover transition-all duration-300"
-					/>
-
-					{#if banners.length > 1}
-						<button
-							on:click={prevBanner}
-							class="absolute top-1/2 left-3 z-10 -translate-y-1/2 rounded-full bg-white/80 p-3 shadow-lg transition hover:bg-white"
-							aria-label="Anterior">Previous</button
-						>
-						<button
-							on:click={nextBanner}
-							class="absolute top-1/2 right-3 z-10 -translate-y-1/2 rounded-full bg-white/80 p-3 shadow-lg transition hover:bg-white"
-							aria-label="Siguiente">Next</button
-						>
-
-						<div class="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-1.5">
-							{#each banners as _, i}
-								<div
-									class={`h-2 w-2 rounded-full transition ${i === currentBannerIndex ? 'bg-white' : 'bg-white/50'}`}
-								></div>
-							{/each}
-						</div>
-					{/if}
-				{:else}
-					<div class="flex h-full items-center justify-center bg-gray-700 text-lg text-white">
-						Sin banner
-					</div>
-				{/if}
-			</div>
-
-			<h1 class="mb-6 text-center text-3xl font-bold text-gray-900 md:text-4xl">
-				{user.display_name || user.username || 'Usuario'}
-
-				{#if user.is_verified}
-					<span class="ml-2 text-blue-500" title="Perfil verificado"> ✓ </span>
-				{/if}
-			</h1>
-
-			<div class="mb-8 grid grid-cols-1 gap-3 text-gray-700 md:grid-cols-2">
-				{#if user.username}
-					<p>
-						<span class="font-medium">Usuario:</span>
-						@{user.username}
-					</p>
-				{/if}
-
-				{#if user.role}
-					<p>
-						<span class="font-medium">Tipo:</span>
-						{user.role === 'creator' ? 'Creador' : 'Fan'}
-					</p>
-				{/if}
-			</div>
-
-			<div class="mb-8 rounded-lg bg-gray-50 p-6">
-				<h3 class="mb-3 text-lg font-semibold text-gray-900">Sobre mí</h3>
-				{#if user.bio}
-					<p class="whitespace-pre-wrap text-gray-700">{user.bio}</p>
-				{:else}
-					<p class="text-gray-500 italic">Sin descripción.</p>
-				{/if}
-			</div>
-
-			{#if photos.length > 0}
-				<div class="mb-8">
-					<h2 class="mb-4 text-2xl font-bold">Álbum Exclusivo</h2>
-					<div class="grid grid-cols-2 gap-4 md:grid-cols-4">
-						{#each photos.slice(0, 4) as photo}
+	<div class="mx-auto w-full max-w-5xl px-4 py-6">
+		<!-- Banner -->
+		<div class="relative mb-0 h-56 w-full overflow-hidden rounded-t-2xl bg-black/60 md:h-72">
+			{#if banners.length > 0}
+				<img
+					src={banners[currentBannerIndex].public_url}
+					alt="Banner"
+					class="h-full w-full object-cover"
+				/>
+				{#if banners.length > 1}
+					<button
+						on:click={prevBanner}
+						class="absolute top-1/2 left-3 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white hover:bg-black/80"
+						aria-label="Anterior">‹</button
+					>
+					<button
+						on:click={nextBanner}
+						class="absolute top-1/2 right-3 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white hover:bg-black/80"
+						aria-label="Siguiente">›</button
+					>
+					<div class="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1">
+						{#each banners as _, i}
 							<div
-								class="group relative cursor-pointer overflow-hidden rounded-lg"
-								on:click={showPaywall}
-							>
-								{#if photo.tipo === 'video'}
-									<video
-										src={photo.public_url}
-										muted
-										loop
-										autoplay
-										class="h-48 w-full rounded-lg object-cover brightness-75"
-									></video>
-								{:else}
-									<img
-										src={photo.public_url}
-										alt={photo.titulo}
-										class="h-48 w-full rounded-lg object-cover brightness-75"
-									/>
-								{/if}
-								<div
-									class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition group-hover:opacity-100"
-								>
-									<span class="text-3xl text-white">Locked</span>
-								</div>
-							</div>
+								class="h-1.5 w-1.5 rounded-full transition {i === currentBannerIndex
+									? 'bg-white'
+									: 'bg-white/40'}"
+							></div>
 						{/each}
 					</div>
-					{#if photos.length > 4}
-						<p class="mt-4 text-center text-sm text-gray-600">
-							+{photos.length - 4} más...
-							<strong class="text-green-600">Paga para desbloquear</strong>
-						</p>
-					{/if}
-				</div>
+				{/if}
 			{:else}
-				<div class="mb-8">
-					<h2 class="mb-4 text-2xl font-bold">Álbum Exclusivo</h2>
-					<p class="text-gray-500 italic">Sin fotos aún.</p>
+				<div
+					class="flex h-full items-center justify-center bg-gradient-to-br from-pink-950/40 to-purple-950/40"
+				>
+					<span class="text-4xl text-pink-400/30">Agua en la Boca</span>
 				</div>
 			{/if}
 		</div>
-	</div>
-{/if}
 
-<!-- MODAL -->
-{#if selectedPhoto}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
-		on:click={() => (selectedPhoto = null)}
-	>
-		<div class="relative w-full max-w-4xl" on:click|stopPropagation>
-			<button
-				on:click={() => (selectedPhoto = null)}
-				class="absolute -top-12 right-0 text-3xl text-white hover:text-gray-300">×</button
-			>
+		<!-- Perfil header -->
+		<div class="rounded-b-2xl border border-t-0 border-pink-900/30 bg-black/50 px-6 pb-6">
+			<div class="flex flex-col gap-4 pt-4 sm:flex-row sm:items-end sm:gap-6">
+				<!-- Avatar -->
+				<div class="-mt-10 shrink-0 sm:-mt-8">
+					{#if profile.avatar_key}
+						<img
+							src={profile.avatar_key}
+							alt={profile.display_name}
+							class="h-24 w-24 rounded-full border-4 border-black object-cover shadow-xl sm:h-28 sm:w-28"
+						/>
+					{:else}
+						<div
+							class="flex h-24 w-24 items-center justify-center rounded-full border-4 border-black bg-gradient-to-br from-pink-900 to-purple-900 text-3xl font-bold text-pink-300 shadow-xl sm:h-28 sm:w-28"
+						>
+							{getInitials(profile.display_name ?? profile.username)}
+						</div>
+					{/if}
+				</div>
 
-			{#if selectedPhoto.tipo === 'video'}
-				<video src={selectedPhoto.public_url} controls class="max-h-[80vh] w-full rounded-lg"
-				></video>
-			{:else}
-				<div class="group relative overflow-hidden rounded-lg">
-					<img
-						src={selectedPhoto.public_url}
-						alt={selectedPhoto.titulo}
-						class="max-h-[80vh] w-full object-contain transition-transform duration-300 group-hover:scale-110"
-					/>
-					<div
-						class="absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100"
-					>
-						<span class="text-6xl text-white">Magnifying Glass</span>
+				<!-- Info -->
+				<div class="min-w-0 flex-1">
+					<div class="flex flex-wrap items-center gap-2">
+						<h1 class="text-2xl font-bold text-pink-100">
+							{profile.display_name ?? profile.username ?? 'Usuario'}
+						</h1>
+						{#if profile.is_verified}
+							<span class="text-blue-400" title="Verificada" aria-label="Verificada">✓</span>
+						{/if}
+						{#if profile.role === 'creator'}
+							<span
+								class="rounded-full bg-pink-600/20 px-2 py-0.5 text-xs font-semibold text-pink-400"
+								>Creadora</span
+							>
+						{/if}
 					</div>
-				</div>
-			{/if}
 
-			{#if selectedPhoto.titulo || selectedPhoto.descripcion}
-				<div class="mt-4 text-center text-white">
-					{#if selectedPhoto.titulo}<h3 class="text-xl font-semibold">
-							{selectedPhoto.titulo}
-						</h3>{/if}
-					{#if selectedPhoto.descripcion}<p class="mt-2">{selectedPhoto.descripcion}</p>{/if}
+					{#if profile.username}
+						<p class="text-sm text-pink-400/60">@{profile.username}</p>
+					{/if}
+
+					<div class="mt-2 flex gap-4 text-sm text-pink-300/70">
+						<span
+							><strong class="text-pink-100">{profile.media_count ?? 0}</strong> publicaciones</span
+						>
+						<span
+							><strong class="text-pink-100">{profile.followers_count ?? 0}</strong> seguidoras</span
+						>
+					</div>
+
+					{#if profile.bio}
+						<p class="mt-2 text-sm text-pink-300/80">{profile.bio}</p>
+					{/if}
 				</div>
+
+				<!-- Acciones -->
+				{#if !isOwnProfile}
+					<div class="flex shrink-0 flex-col gap-2 sm:items-end">
+						<FollowButton targetUserId={/** @type {string} */ (profileId)} />
+						{#if profile.role === 'creator'}
+							<SubscribeButton
+								creatorId={/** @type {string} */ (profileId)}
+								price={profile.subscription_price}
+								creatorName={profile.display_name}
+							/>
+						{/if}
+						<a
+							href="/mensajes/{profileId}"
+							class="rounded-full border border-white/10 px-4 py-2 text-center text-sm text-pink-300 transition hover:bg-white/5"
+						>
+							Mensaje
+						</a>
+					</div>
+				{/if}
+			</div>
+		</div>
+
+		<!-- Contenido -->
+		<div class="mt-6">
+			{#if canSeePrivate && privateItems.length > 0}
+				<!-- Tabs público / privado -->
+				<div class="mb-4 flex gap-1 rounded-xl border border-pink-900/30 bg-black/40 p-1">
+					<button
+						on:click={() => (activeTab = 'publico')}
+						class="flex-1 rounded-lg py-2 text-sm font-semibold transition
+							{activeTab === 'publico' ? 'bg-pink-600/20 text-pink-300' : 'text-pink-300/50 hover:text-pink-300'}"
+					>
+						Público ({publicItems.length})
+					</button>
+					<button
+						on:click={() => (activeTab = 'privado')}
+						class="flex-1 rounded-lg py-2 text-sm font-semibold transition
+							{activeTab === 'privado' ? 'bg-pink-600/20 text-pink-300' : 'text-pink-300/50 hover:text-pink-300'}"
+					>
+						Exclusivo ({privateItems.length})
+					</button>
+				</div>
+
+				{#if activeTab === 'publico'}
+					<MediaGrid
+						items={publicItems}
+						showActions={true}
+						isOwner={isOwnProfile}
+						canViewPrivate={canSeePrivate}
+					/>
+				{:else}
+					<MediaGrid
+						items={privateItems}
+						showActions={true}
+						isOwner={isOwnProfile}
+						canViewPrivate={true}
+					/>
+				{/if}
+			{:else}
+				<MediaGrid
+					items={mediaItems}
+					showActions={true}
+					isOwner={isOwnProfile}
+					canViewPrivate={canSeePrivate}
+				/>
+
+				{#if !isOwnProfile && !isSubscribed && privateItems.length > 0}
+					<div
+						class="mt-4 rounded-2xl border border-pink-500/30 bg-gradient-to-r from-pink-950/60 to-purple-950/60 p-6 text-center"
+					>
+						<svg
+							class="mx-auto mb-3 h-10 w-10 text-pink-400"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.5"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+							/>
+						</svg>
+						<h3 class="mb-1 font-bold text-pink-100">Contenido exclusivo</h3>
+						<p class="mb-4 text-sm text-pink-300/70">
+							{privateItems.length} publicación{privateItems.length !== 1 ? 'es' : ''} solo para suscriptoras
+						</p>
+						<SubscribeButton
+							creatorId={/** @type {string} */ (profileId)}
+							price={profile.subscription_price}
+							creatorName={profile.display_name}
+						/>
+					</div>
+				{/if}
 			{/if}
 		</div>
 	</div>

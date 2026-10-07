@@ -83,8 +83,10 @@
 		<h3 class="flex items-center gap-1.5 font-semibold text-pink-100">
 			<span class="truncate">{etiqueta}</span>
 			{#if isVerified}
-				<span class="shrink-0 text-blue-500" title="Perfil verificado" aria-label="Perfil verificado"
-					>&#10003;</span
+				<span
+					class="shrink-0 text-blue-500"
+					title="Perfil verificado"
+					aria-label="Perfil verificado">&#10003;</span
 				>
 			{/if}
 		</h3>
@@ -93,7 +95,7 @@
 			{#if ubicacion}
 				{ubicacion}
 			{:else}
-				<span class="italic text-pink-300/60">Ubicación no disponible</span>
+				<span class="text-pink-300/60 italic">Ubicación no disponible</span>
 			{/if}
 		</p>
 	</div>

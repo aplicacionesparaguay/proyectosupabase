@@ -4,6 +4,7 @@
 	import { user } from '$lib/stores/auth';
 	import { supabase } from '$lib/supabaseClient';
 	import { onMount } from 'svelte';
+	import NotificationBell from '$lib/components/NotificationBell.svelte';
 
 	let isLogin = true;
 	let showMenu = false;
@@ -85,7 +86,45 @@
 
 		<!-- Usuario logueado -->
 		{#if $user}
-			<div class="relative">
+			<div class="relative flex items-center gap-1">
+				<a
+					href="/publicar"
+					class="hidden items-center gap-1.5 rounded-full bg-gradient-to-r from-pink-600 to-purple-600 px-4 py-2 text-sm font-bold text-white shadow-lg transition hover:brightness-110 md:flex"
+				>
+					<svg
+						class="h-4 w-4"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.5"
+						viewBox="0 0 24 24"
+					>
+						<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+					</svg>
+					Publicar
+				</a>
+
+				<a
+					href="/mensajes"
+					class="relative flex h-10 w-10 items-center justify-center rounded-full text-pink-300 transition hover:bg-white/10"
+					aria-label="Mensajes"
+				>
+					<svg
+						class="h-5 w-5"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+						/>
+					</svg>
+				</a>
+
+				<NotificationBell />
+
 				<button
 					aria-label="Abrir menú"
 					class="rounded-full bg-white/10 p-3 transition hover:bg-white/20 md:hidden"
