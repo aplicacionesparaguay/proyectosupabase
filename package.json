@@ -11,7 +11,12 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json --watch",
 		"format": "prettier --write .",
-		"lint": "prettier --check ."
+		"lint": "prettier --check .",
+		"test:security": "node scripts/offline.mjs test",
+		"worker": "node worker/index.js",
+		"test": "node scripts/offline.mjs test",
+		"check:offline": "node scripts/offline.mjs check",
+		"build:offline": "node scripts/offline.mjs build"
 	},
 	"devDependencies": {
 		"@fontsource/fira-mono": "^5.2.7",
@@ -34,13 +39,19 @@
 		"svelte-preprocess": "^6.0.3",
 		"tailwindcss": "^4.1.14",
 		"typescript": "^5.9.3",
-		"vite": "^7.1.7"
+		"vite": "^7.1.7",
+		"vitest": "^5.1.0"
 	},
 	"dependencies": {
 		"@aws-sdk/client-s3": "^3.1127.0",
 		"@aws-sdk/s3-request-presigner": "^3.1127.0",
 		"@supabase/ssr": "^0.12.6",
 		"@supabase/supabase-js": "^2.115.0",
-		"face-api.js": "^0.22.2"
+		"@tensorflow/tfjs": "^4.22.0",
+		"@tensorflow/tfjs-backend-wasm": "^4.22.0",
+		"@vladmandic/face-api": "^1.7.15",
+		"face-api.js": "^0.22.2",
+		"pg": "^8.23.1",
+		"sharp": "^0.35.5"
 	}
 }

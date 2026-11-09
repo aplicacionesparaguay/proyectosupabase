@@ -4,6 +4,7 @@
 	import CreatorCard from '$lib/components/CreatorCard.svelte';
 	import MediaGrid from '$lib/components/MediaGrid.svelte';
 	import { supabase } from '$lib/supabaseClient';
+	import { SOCIAL } from '$lib/featureFlags';
 
 	/**
 	 * @typedef {Object} Creadora
@@ -12,7 +13,8 @@
 	 * @property {string | null} username
 	 * @property {string | null} city
 	 * @property {string | null} countryName
-	 * @property {string | null} photoUrl
+	 * @property {string | null} coverUrl
+ * @property {string | null} avatarUrl
 	 * @property {boolean} isVerified
 	 * @property {number} [followerCount]
 	 */
@@ -26,48 +28,74 @@
 	/** @type {any[]} */
 	let feedItems = [];
 	let feedLoading = false;
+	/** @type {string | null} */
+	let feedError = null;
 	let tab = 'creadoras';
 
 	$: logueado = $session !== null;
 
+	// El feed depende de tablas que aun no existen. Si la funcion esta apagada,
+	// la pestana no se ofrece y se muestra directamente el listado de creadoras.
+	$: feedDisponible = SOCIAL.follows;
+
 	onMount(async () => {
 		if (!logueado) return;
-		tab = 'feed';
-		await loadFeed();
+		if (feedDisponible) {
+			tab = 'feed';
+			await loadFeed();
+		}
 	});
 
 	async function loadFeed() {
 		if (!$session?.user) return;
+
+		// El feed social necesita `follows` y un `media` con el esquema completo.
+		// `follows` no existe, y `media` existe pero solo tiene tres columnas, de
+		// modo que la consulta falla con 400. Con el interruptor apagado no se
+		// lanza ninguna de las dos: cero errores en consola.
+		//
+		// El mensaje NO finge que el feed este vacio: explica que la funcion no
+		// esta habilitada todavia.
+		if (!SOCIAL.follows) {
+			feedError =
+				'El feed social todavia no esta disponible. Esta funcionalidad se habilita cuando su base de datos este lista.';
+			feedLoading = false;
+			return;
+		}
+
 		feedLoading = true;
 
-		const { data: follows } = await supabase
+		const { data: follows, error: followsError } = await supabase
 			.from('follows')
 			.select('following_id')
 			.eq('follower_id', $session.user.id);
 
+		if (followsError) {
+			feedError = 'No se pudieron cargar las cuentas seguidas.';
+			feedLoading = false;
+			return;
+		}
+
 		const followingIds = (follows ?? []).map((f) => f.following_id);
 		const ids = [...followingIds, $session.user.id];
 
-		const { data: media } = await supabase
+		const { data: media, error: mediaError } = await supabase
 			.from('media')
-			.select(
-				`id, user_id, tipo, public_url, storage_key, titulo, descripcion,
-				 es_privado, bucket, orden, created_at,
-				 profiles(display_name, username, avatar_key),
-				 media_likes(count),
-				 media_comments(count)`
-			)
+			.select('id, user_id, tipo, public_url, storage_key, created_at')
 			.in('user_id', ids)
 			.eq('tipo', 'photo')
 			.order('created_at', { ascending: false })
 			.limit(40);
 
-		feedItems = (media ?? []).map((m) => ({
-			...m,
-			like_count: m.media_likes?.[0]?.count ?? 0,
-			comment_count: m.media_comments?.[0]?.count ?? 0
-		}));
+		if (mediaError) {
+			feedError =
+				'El feed no se puede mostrar: el esquema de la tabla media no coincide con el que espera la aplicacion.';
+			feedLoading = false;
+			return;
+		}
 
+		feedError = null;
+		feedItems = media ?? [];
 		feedLoading = false;
 	}
 </script>
@@ -75,17 +103,20 @@
 {#if logueado}
 	<!-- FEED PARA LOGUEADOS -->
 	<section class="mx-auto w-full max-w-5xl px-4 py-8">
-		<!-- Tabs -->
+		<!-- Tabs. La pestana del feed solo aparece si la funcion esta habilitada:
+		     con ella apagada no habria nada que cargar y solo generaria errores. -->
 		<div class="mb-6 flex gap-1 rounded-2xl border border-pink-900/30 bg-black/40 p-1">
-			<button
-				on:click={() => (tab = 'feed')}
-				class="flex-1 rounded-xl py-2.5 text-sm font-semibold transition
-					{tab === 'feed'
-					? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white'
-					: 'text-pink-300/60 hover:text-pink-300'}"
-			>
-				Para ti
-			</button>
+			{#if feedDisponible}
+				<button
+					on:click={() => (tab = 'feed')}
+					class="flex-1 rounded-xl py-2.5 text-sm font-semibold transition
+						{tab === 'feed'
+						? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white'
+						: 'text-pink-300/60 hover:text-pink-300'}"
+				>
+					Para ti
+				</button>
+			{/if}
 			<button
 				on:click={() => (tab = 'creadoras')}
 				class="flex-1 rounded-xl py-2.5 text-sm font-semibold transition
@@ -97,9 +128,21 @@
 			</button>
 		</div>
 
-		{#if tab === 'feed'}
+		{#if tab === 'feed' && feedDisponible}
 			{#if feedLoading}
 				<div class="py-16 text-center text-pink-300/50">Cargando...</div>
+			{:else if feedError}
+				<!-- El error se muestra tal cual: no se disfraza de "feed vacio". -->
+				<div class="rounded-2xl border border-amber-500/30 bg-amber-950/20 px-6 py-12 text-center">
+					<p class="mb-2 text-lg text-amber-300">Feed no disponible</p>
+					<p class="mx-auto max-w-md text-sm text-amber-200/70">{feedError}</p>
+					<button
+						on:click={() => (tab = 'creadoras')}
+						class="mt-4 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 px-6 py-2.5 font-semibold text-white transition hover:brightness-110"
+					>
+						Explorar creadoras
+					</button>
+				</div>
 			{:else if feedItems.length === 0}
 				<div
 					class="rounded-2xl border border-dashed border-pink-900/40 bg-black/20 px-6 py-16 text-center"
@@ -135,7 +178,8 @@
 								username={creadora.username}
 								city={creadora.city}
 								countryName={creadora.countryName}
-								photoUrl={creadora.photoUrl}
+								coverUrl={creadora.coverUrl}
+								avatarUrl={creadora.avatarUrl}
 								isVerified={creadora.isVerified}
 							/>
 						</li>
@@ -189,7 +233,8 @@
 							username={creadora.username}
 							city={creadora.city}
 							countryName={creadora.countryName}
-							photoUrl={creadora.photoUrl}
+							coverUrl={creadora.coverUrl}
+								avatarUrl={creadora.avatarUrl}
 							isVerified={creadora.isVerified}
 						/>
 					</li>

@@ -1,14 +1,13 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { session, user } from '$lib/stores/auth';
-	import { supabase } from '$lib/supabaseClient';
+	import { session } from '$lib/stores/auth';
+	import { uploadPhoto, validatePhotoFile } from '$lib/media/client';
 	import {
-		uploadToR2,
-		R2_FOLDERS,
-		validateImageFile,
-		MAX_UPLOAD_BYTES
-	} from '$lib/upload/r2Upload';
+		MAX_DESCRIPTION_LENGTH,
+		MAX_TITLE_LENGTH,
+		maxPhotoBytesLabel
+	} from '$lib/media/constants';
 
 	let loading = true;
 	let uploading = false;
@@ -22,11 +21,10 @@
 	let preview = null;
 	let titulo = '';
 	let descripcion = '';
-	let esPrivado = false;
 	/** @type {HTMLInputElement | undefined} */
 	let fileInput;
 
-	onMount(async () => {
+	onMount(() => {
 		if (!$session?.user) {
 			goto('/login');
 			return;
@@ -34,23 +32,29 @@
 		loading = false;
 	});
 
-	/** @param {Event} e */
-	function onFileChange(e) {
-		const input = /** @type {HTMLInputElement} */ (e.target);
-		const f = input?.files?.[0];
-		if (!f) return;
+	onDestroy(() => {
+		if (preview) URL.revokeObjectURL(preview);
+	});
 
-		const err = validateImageFile(f);
-		if (err) {
-			error = err;
+	/** @param {Event} event */
+	function onFileChange(event) {
+		const input = /** @type {HTMLInputElement} */ (event.target);
+		const selected = input?.files?.[0];
+		if (!selected) return;
+
+		const problem = validatePhotoFile(selected);
+		if (problem) {
+			error = problem;
 			file = null;
+			if (preview) URL.revokeObjectURL(preview);
 			preview = null;
 			return;
 		}
 
 		error = '';
-		file = f;
-		preview = URL.createObjectURL(f);
+		if (preview) URL.revokeObjectURL(preview);
+		file = selected;
+		preview = URL.createObjectURL(selected);
 	}
 
 	function removeFile() {
@@ -61,35 +65,23 @@
 	}
 
 	async function publish() {
-		if (!file || !$user || uploading) return;
+		if (!file || !$session?.user || uploading) return;
 
 		error = '';
 		uploading = true;
 		uploadProgress = 0;
 
 		try {
-			const { publicUrl, key } = await uploadToR2(file, R2_FOLDERS.post, {
-				onProgress: (p) => (uploadProgress = p)
+			await uploadPhoto(file, {
+				title: titulo,
+				description: descripcion,
+				onProgress: (percent) => (uploadProgress = percent)
 			});
-
-			const { error: insertError } = await supabase.from('media').insert({
-				user_id: $user?.id,
-				tipo: 'photo',
-				storage_key: key,
-				public_url: publicUrl,
-				bucket: esPrivado ? 'private' : 'public',
-				es_privado: esPrivado,
-				titulo: titulo.trim() || null,
-				descripcion: descripcion.trim() || null,
-				orden: 0
-			});
-
-			if (insertError) throw insertError;
 
 			success = true;
-			setTimeout(() => goto('/perfil'), 1500);
-		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
+			setTimeout(() => goto('/perfil'), 1800);
+		} catch (uploadError) {
+			error = uploadError instanceof Error ? uploadError.message : String(uploadError);
 		} finally {
 			uploading = false;
 		}
@@ -105,15 +97,18 @@
 {:else}
 	<div class="mx-auto w-full max-w-lg px-4 py-8">
 		<div class="rounded-2xl border border-pink-900/30 bg-black/50 p-6">
-			<h1 class="mb-6 text-2xl font-bold text-pink-100">Nueva publicación</h1>
+			<h1 class="mb-2 text-2xl font-bold text-pink-100">Nueva foto</h1>
+			<p class="mb-6 text-sm text-pink-300/60">
+				La foto pasara por revision humana. Los rostros detectados se protegen antes de mostrarla en
+				publico.
+			</p>
 
 			{#if success}
 				<div class="mb-4 rounded-xl border border-green-500/30 bg-green-900/20 p-4 text-center">
-					<p class="font-semibold text-green-400">¡Publicado!</p>
-					<p class="text-sm text-green-300/70">Redirigiendo a tu perfil...</p>
+					<p class="font-semibold text-green-400">Foto recibida</p>
+					<p class="text-sm text-green-300/70">Queda pendiente de revision. Redirigiendo...</p>
 				</div>
 			{:else}
-				<!-- Selector de archivo -->
 				{#if !preview}
 					<button
 						on:click={() => fileInput?.click()}
@@ -135,14 +130,13 @@
 						<div class="text-center">
 							<p class="font-semibold text-pink-300">Seleccionar foto</p>
 							<p class="mt-1 text-xs text-pink-400/50">
-								JPG, PNG, WEBP o GIF · máx. {MAX_UPLOAD_BYTES / (1024 * 1024)} MB
+								JPG, PNG o WebP · maximo {maxPhotoBytesLabel()}
 							</p>
 						</div>
 					</button>
 				{:else}
-					<!-- Preview -->
 					<div class="relative mb-4 overflow-hidden rounded-xl">
-						<img src={preview} alt="Preview" class="max-h-80 w-full object-cover" />
+						<img src={preview} alt="Vista previa" class="max-h-80 w-full object-cover" />
 						<button
 							on:click={removeFile}
 							class="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black/90"
@@ -156,65 +150,38 @@
 				<input
 					bind:this={fileInput}
 					type="file"
-					accept="image/jpeg,image/png,image/webp,image/gif"
+					accept="image/jpeg,image/png,image/webp"
 					class="hidden"
 					on:change={onFileChange}
 				/>
 
-				<!-- Título -->
 				<div class="mb-4">
-					<label for="titulo" class="mb-1 block text-sm font-medium text-pink-300"
-						>Título <span class="text-pink-400/50">(opcional)</span></label
-					>
+					<label for="titulo" class="mb-1 block text-sm font-medium text-pink-300">
+						Titulo <span class="text-pink-400/50">(opcional)</span>
+					</label>
 					<input
 						id="titulo"
 						bind:value={titulo}
-						maxlength="100"
-						placeholder="Título de la publicación..."
+						maxlength={MAX_TITLE_LENGTH}
+						placeholder="Titulo de la foto..."
 						class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-white/30 focus:border-pink-500 focus:outline-none"
 					/>
 				</div>
 
-				<!-- Descripción -->
-				<div class="mb-4">
-					<label for="descripcion" class="mb-1 block text-sm font-medium text-pink-300"
-						>Descripción <span class="text-pink-400/50">(opcional)</span></label
-					>
+				<div class="mb-6">
+					<label for="descripcion" class="mb-1 block text-sm font-medium text-pink-300">
+						Descripcion <span class="text-pink-400/50">(opcional)</span>
+					</label>
 					<textarea
 						id="descripcion"
 						bind:value={descripcion}
-						maxlength="500"
+						maxlength={MAX_DESCRIPTION_LENGTH}
 						rows="3"
-						placeholder="Cuéntales algo sobre esta publicación..."
+						placeholder="Cuentanos algo sobre esta foto..."
 						class="w-full resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-white/30 focus:border-pink-500 focus:outline-none"
 					></textarea>
 				</div>
 
-				<!-- Privacidad -->
-				<div
-					class="mb-6 flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3"
-				>
-					<div>
-						<p class="text-sm font-medium text-pink-100">Contenido exclusivo</p>
-						<p class="text-xs text-pink-300/50">Solo visible para suscriptoras</p>
-					</div>
-					<button
-						role="switch"
-						aria-checked={esPrivado}
-						on:click={() => (esPrivado = !esPrivado)}
-						class="relative h-7 w-12 rounded-full transition {esPrivado
-							? 'bg-pink-600'
-							: 'bg-white/10'}"
-					>
-						<span
-							class="absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform {esPrivado
-								? 'translate-x-5'
-								: 'translate-x-0.5'}"
-						></span>
-					</button>
-				</div>
-
-				<!-- Progreso -->
 				{#if uploading && uploadProgress > 0}
 					<div class="mb-4">
 						<div class="mb-1 flex justify-between text-xs text-pink-300/70">
@@ -230,7 +197,6 @@
 					</div>
 				{/if}
 
-				<!-- Error -->
 				{#if error}
 					<p
 						class="mb-4 rounded-xl border border-red-500/30 bg-red-900/20 px-4 py-3 text-sm text-red-400"
@@ -239,7 +205,6 @@
 					</p>
 				{/if}
 
-				<!-- Botones -->
 				<div class="flex gap-3">
 					<a
 						href="/perfil"
@@ -252,7 +217,7 @@
 						disabled={!file || uploading}
 						class="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 font-bold text-white shadow-lg transition hover:brightness-110 disabled:opacity-40"
 					>
-						{uploading ? 'Subiendo...' : 'Publicar'}
+						{uploading ? 'Subiendo...' : 'Enviar a revision'}
 					</button>
 				</div>
 			{/if}

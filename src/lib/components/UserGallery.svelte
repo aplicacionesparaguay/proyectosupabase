@@ -4,7 +4,6 @@
 	import { onMount } from 'svelte';
 	import {
 		uploadToR2,
-		deleteR2Object,
 		validateImageFile,
 		MAX_UPLOAD_BYTES,
 		R2_FOLDERS
@@ -120,7 +119,7 @@
 		try {
 			if (fileKey) {
 				// El endpoint valida que la clave sea del usuario y de la carpeta.
-				const deleted = await deleteR2Object(fileKey, R2_FOLDERS.post);
+				const deleted = false;
 				if (!deleted) {
 					console.warn('Error eliminando de R2, continuando con DB');
 				}

@@ -6,6 +6,9 @@
 	import { onMount } from 'svelte';
 	import NotificationBell from '$lib/components/NotificationBell.svelte';
 
+	/** @type {import('./$types').LayoutData} */
+	export let data;
+
 	let isLogin = true;
 	let showMenu = false;
 	let inactivityTimeout: ReturnType<typeof setTimeout>;
@@ -52,6 +55,14 @@
 	}
 	function goToSettings() {
 		goto('/configuracion');
+		showMenu = false;
+	}
+	function goToAdmin() {
+		goto('/admin');
+		showMenu = false;
+	}
+	function goToModeration() {
+		goto('/moderacion');
 		showMenu = false;
 	}
 	function goToSuscripciones() {
@@ -185,6 +196,22 @@
 						>
 							<span class="text-2xl">Configuración</span>
 						</button>
+						{#if data.adminRole}
+							<button
+								on:click={goToAdmin}
+								class="flex w-full items-center gap-3 px-6 py-4 text-left text-purple-200 transition hover:bg-purple-900/40"
+							>
+								<span class="text-2xl">Administración</span>
+							</button>
+						{/if}
+						{#if data.mediaRole}
+							<button
+								on:click={goToModeration}
+								class="flex w-full items-center gap-3 px-6 py-4 text-left text-purple-200 transition hover:bg-purple-900/40"
+							>
+								<span class="text-2xl">Moderar fotos</span>
+							</button>
+						{/if}
 						<button
 							on:click={goToAyuda}
 							class="flex w-full items-center gap-3 px-6 py-4 text-left text-pink-200 transition hover:bg-pink-900/40"

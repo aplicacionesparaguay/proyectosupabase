@@ -4,6 +4,7 @@
 	import { session, user } from '$lib/stores/auth';
 	import { supabase } from '$lib/supabaseClient';
 	import ConversationList from '$lib/components/ConversationList.svelte';
+	import { SOCIAL } from '$lib/featureFlags';
 
 	/** @type {import('$lib/components/ConversationList.svelte').default['$$prop_def']['conversations']} */
 	let conversations = [];
@@ -16,6 +17,13 @@
 			goto('/login');
 			return;
 		}
+
+		// La tabla `messages` no existe todavia: no se intenta consultar.
+		if (!SOCIAL.messages) {
+			loading = false;
+			return;
+		}
+
 		await loadConversations();
 		subscribeToMessages();
 	});

@@ -2,6 +2,7 @@
 	import { supabase } from '$lib/supabaseClient';
 	import { user } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
+	import { SOCIAL } from '$lib/featureFlags';
 
 	/** @type {string} */
 	export let targetUserId;
@@ -11,6 +12,7 @@
 	let followerCount = 0;
 
 	onMount(async () => {
+		if (!SOCIAL.follows) return;
 		if (!$user) return;
 		const { data } = await supabase
 			.from('follows')
@@ -28,6 +30,7 @@
 	});
 
 	async function toggle() {
+		if (!SOCIAL.follows) return;
 		if (!$user || loading) return;
 		loading = true;
 

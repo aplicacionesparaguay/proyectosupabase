@@ -1,50 +1,28 @@
 // POST /api/media/upload
-// Genera una URL firmada para subir un archivo directo a R2.
-// El navegador recibe { uploadUrl } y hace el PUT; luego inserta la fila en `media`.
+//
+// ENDPOINT RETIRADO.
+//
+// La galeria usa upload-intent + upload-commit. Avatar/portada usan la via
+// de compatibilidad /api/upload/r2, tambien con staging y validacion completa.
+//
+// Este endpoint anterior no hacia nada de eso: aceptaba cualquier tipo de
+// contenido y cualquier tamano, y dejaba que el CLIENTE eligiera el bucket
+// (`es_privado`). Con eso se podia subir al bucket publico un archivo que
+// el navegador interpretara como HTML o SVG (contenido activo servido desde
+// el dominio de la app). Ademas generaba claves con otro formato
+// (`<userId>/<uuid>`) que no encaja con el que reconoce el resto del codigo.
+//
+// Ninguna parte de la aplicacion lo usa (verificado: no hay referencias en
+// `src/`). Se responde 410 Gone para que quede claro a donde va el codigo
+// nuevo, en lugar de dejar vivo un camino mas debil que el bueno.
 import { json } from '@sveltejs/kit';
 
-import { createPresignedUpload, publicUrl } from '$lib/server/r2';
-
-const TIPOS = ['avatar', 'banner', 'photo', 'video'];
-
-/** @type {import('./$types').RequestHandler} */
-export async function POST({ request, locals }) {
-	if (!locals.user) {
-		return json({ error: 'No autorizado' }, { status: 401 });
-	}
-
-	let body;
-	try {
-		body = await request.json();
-	} catch {
-		return json({ error: 'JSON inválido' }, { status: 400 });
-	}
-
-	const { tipo, filename, contentType, es_privado } = body;
-
-	if (!TIPOS.includes(tipo) || !filename || !contentType) {
-		return json({ error: 'Faltan campos: tipo, filename, contentType' }, { status: 400 });
-	}
-
-	const bucket = es_privado ? 'private' : 'public';
-	const safeName = String(filename)
-		.replace(/[^a-zA-Z0-9._-]/g, '-')
-		.slice(-80);
-	const storageKey = `${locals.user.id}/${crypto.randomUUID()}-${safeName}`;
-
-	try {
-		const uploadUrl = await createPresignedUpload(storageKey, bucket, contentType);
-		return json({
-			storage_key: storageKey,
-			bucket,
-			upload_url: uploadUrl,
-			public_url: bucket === 'public' ? publicUrl(storageKey) : null
-		});
-	} catch (e) {
-		console.error('upload presign error:', e);
-		return json(
-			{ error: e instanceof Error ? e.message : 'Error generando URL de subida' },
-			{ status: 500 }
-		);
-	}
+export async function POST() {
+	return json(
+		{
+			error:
+				'Este endpoint esta retirado. Usa /api/media/upload-intent y /api/media/upload-commit para fotografias.'
+		},
+		{ status: 410 }
+	);
 }

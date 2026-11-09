@@ -1,52 +1,39 @@
-// POST /api/media/delete
-// Elimina un objeto de R2 y su fila en `media`. Solo la dueña.
 import { json } from '@sveltejs/kit';
-import { deleteObject } from '$lib/server/r2';
+import { authFailure, isUuid, readJson, safeRpcMessage } from '$lib/server/media';
 
-/** @type {import('./$types').RequestHandler} */
+/**
+ * POST /api/media/delete
+ *
+ * Solicita el borrado de una fotografia propia. La fila se marca como
+ * eliminada de inmediato (deja de aparecer en la galeria) y el borrado real
+ * de los objetos se encola como trabajo durable. El endpoint no borra objetos
+ * de R2 de forma sincrona: si el worker falla, el trabajo se reintenta.
+ *
+ * @type {import('./$types').RequestHandler}
+ */
 export async function POST({ request, locals }) {
-	if (!locals.user) {
-		return json({ error: 'No autorizado' }, { status: 401 });
+	const denied = authFailure(locals);
+	if (denied) return denied;
+
+	const body = await readJson(request);
+	const mediaId = body?.mediaId;
+
+	if (!isUuid(mediaId)) {
+		return json({ error: 'Identificador de archivo invalido.' }, { status: 400 });
 	}
 
-	let body;
-	try {
-		body = await request.json();
-	} catch {
-		return json({ error: 'JSON inválido' }, { status: 400 });
+	const { error } = await locals.supabase.rpc('media_request_delete', {
+		p_media_id: mediaId
+	});
+
+	if (error) {
+		const message = safeRpcMessage(error);
+		const code = typeof error.code === 'string' ? error.code : '';
+		const status = code === 'P0002' ? 404 : code === '28000' ? 401 : code === '42501' ? 403 : 400;
+
+		if (!message) console.error('media_request_delete no disponible');
+		return json({ error: message ?? 'No se pudo eliminar la foto.' }, { status });
 	}
 
-	const { media_id } = body;
-	if (!media_id) {
-		return json({ error: 'Falta media_id' }, { status: 400 });
-	}
-
-	const supabase = locals.supabase;
-
-	const { data: media, error } = await supabase
-		.from('media')
-		.select('user_id, storage_key, bucket')
-		.eq('id', media_id)
-		.single();
-
-	if (error || !media) {
-		return json({ error: 'Contenido no encontrado' }, { status: 404 });
-	}
-	if (media.user_id !== locals.user.id) {
-		return json({ error: 'No autorizado' }, { status: 403 });
-	}
-
-	try {
-		if (media.storage_key) {
-			await deleteObject(media.storage_key, media.bucket);
-		}
-		const { error: delErr } = await supabase.from('media').delete().eq('id', media_id);
-		if (delErr) {
-			return json({ error: delErr.message }, { status: 500 });
-		}
-		return json({ ok: true });
-	} catch (e) {
-		console.error('delete error:', e);
-		return json({ error: e instanceof Error ? e.message : 'Error al eliminar' }, { status: 500 });
-	}
+	return json({ ok: true, queued: true }, { status: 202 });
 }

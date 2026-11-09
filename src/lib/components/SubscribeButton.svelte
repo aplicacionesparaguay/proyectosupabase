@@ -3,6 +3,7 @@
 	import { user } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { SOCIAL } from '$lib/featureFlags';
 
 	/** @type {string} */
 	export let creatorId;
@@ -21,6 +22,7 @@
 	let subscriptionId = null;
 
 	onMount(async () => {
+		if (!SOCIAL.subscriptions) return;
 		if (!$user) return;
 		const { data } = await supabase
 			.from('media_subscriptions')
@@ -36,6 +38,7 @@
 	});
 
 	async function subscribe() {
+		if (!SOCIAL.subscriptions) return;
 		if (!$user) {
 			goto('/login');
 			return;
@@ -66,6 +69,7 @@
 	}
 
 	async function unsubscribe() {
+		if (!SOCIAL.subscriptions) return;
 		if (!subscriptionId || loading) return;
 		loading = true;
 

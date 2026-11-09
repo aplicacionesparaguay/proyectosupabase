@@ -6,6 +6,8 @@
 	import MediaGrid from '$lib/components/MediaGrid.svelte';
 	import FollowButton from '$lib/components/FollowButton.svelte';
 	import SubscribeButton from '$lib/components/SubscribeButton.svelte';
+	import { loadCovers, loadPublicMediaPage } from '$lib/media/client';
+	import { SOCIAL } from '$lib/featureFlags';
 
 	/**
 	 * @typedef {Object} Perfil
@@ -32,12 +34,16 @@
 	let currentBannerIndex = 0;
 	/** @type {any[]} */
 	let mediaItems = [];
+	/** @type {string | null} */
+	let mediaCursor = null;
+	let mediaLoading = false;
+	let mediaError = '';
+	/** @type {number} */
+	let mediaCount = 0;
 	let loading = true;
 	/** @type {string | null} */
 	let error = null;
-	let isSubscribed = false;
 	let isOwnProfile = false;
-	let activeTab = 'publico';
 
 	/** @type {string} */
 	let profileId;
@@ -58,25 +64,14 @@
 
 			isOwnProfile = $user?.id === profileId;
 
-			// Verificar suscripción
-			if ($user && !isOwnProfile) {
-				const { data: sub } = await supabase
-					.from('media_subscriptions')
-					.select('id, status')
-					.eq('creator_id', profileId)
-					.eq('subscriber_id', $user?.id)
-					.maybeSingle();
-				isSubscribed = sub?.status === 'activa';
-			}
+			// Solo se cuentan y muestran fotos aprobadas. La RPC vuelve a
+			// comprobar el estado en la base; el cliente no decide visibilidad.
+			const { data: count } = await supabase.rpc('public_approved_media_count', {
+				target_user_id: profileId
+			});
+			mediaCount = Number(count ?? 0);
 
-			// Cargar banners (media tipo banner, público)
-			const { data: bannerData } = await supabase
-				.from('media')
-				.select('public_url, orden')
-				.eq('user_id', profileId)
-				.eq('tipo', 'banner')
-				.order('orden', { ascending: true });
-			banners = bannerData ?? [];
+			banners = await loadCovers(profileId);
 
 			// Cargar contenido
 			await loadMedia();
@@ -87,34 +82,32 @@
 		}
 	});
 
-	async function loadMedia() {
-		let query = supabase
-			.from('media')
-			.select(
-				`id, user_id, tipo, public_url, storage_key, titulo, descripcion,
-				 es_privado, bucket, orden, created_at,
-				 media_likes(count),
-				 media_comments(count)`
-			)
-			.eq('user_id', profileId)
-			.eq('tipo', 'photo')
-			.order('created_at', { ascending: false });
+	async function loadMedia(append = false) {
+		if (mediaLoading) return;
+		mediaLoading = true;
+		mediaError = '';
+		try {
+		const { items: rows, nextCursor } = await loadPublicMediaPage(profileId, { cursor: append ? mediaCursor : null });
 
-		if (!isOwnProfile && !isSubscribed) {
-			query = query.eq('es_privado', false);
-		}
-
-		const { data } = await query;
-		mediaItems = (data ?? []).map((m) => ({
-			...m,
-			like_count: m.media_likes?.[0]?.count ?? 0,
-			comment_count: m.media_comments?.[0]?.count ?? 0
+		const incoming = rows.map((row) => ({
+			id: row.id,
+			user_id: profileId,
+			tipo: 'photo',
+			public_url: row.previewUrl ?? row.fullUrl,
+			storage_key: null,
+			titulo: row.title,
+			descripcion: row.description,
+			es_privado: false,
+			bucket: 'private',
+			orden: 0,
+			created_at: row.created_at
 		}));
+		mediaItems = append ? [...mediaItems, ...incoming.filter((row) => !mediaItems.some((current) => current.id === row.id))] : incoming;
+		mediaCursor = nextCursor;
+		} catch (err) {
+			mediaError = err instanceof Error ? err.message : 'No se pudo cargar la galeria.';
+		} finally { mediaLoading = false; }
 	}
-
-	$: publicItems = mediaItems.filter((m) => !m.es_privado);
-	$: privateItems = mediaItems.filter((m) => m.es_privado);
-	$: canSeePrivate = isOwnProfile || isSubscribed;
 
 	const prevBanner = () => {
 		if (banners.length > 1)
@@ -230,9 +223,7 @@
 					{/if}
 
 					<div class="mt-2 flex gap-4 text-sm text-pink-300/70">
-						<span
-							><strong class="text-pink-100">{profile.media_count ?? 0}</strong> publicaciones</span
-						>
+						<span><strong class="text-pink-100">{mediaCount}</strong> publicaciones</span>
 						<span
 							><strong class="text-pink-100">{profile.followers_count ?? 0}</strong> seguidoras</span
 						>
@@ -246,97 +237,43 @@
 				<!-- Acciones -->
 				{#if !isOwnProfile}
 					<div class="flex shrink-0 flex-col gap-2 sm:items-end">
-						<FollowButton targetUserId={/** @type {string} */ (profileId)} />
-						{#if profile.role === 'creator'}
+						{#if SOCIAL.follows}
+							<FollowButton targetUserId={profileId} />
+						{/if}
+						{#if SOCIAL.subscriptions && profile.role === 'creator'}
 							<SubscribeButton
-								creatorId={/** @type {string} */ (profileId)}
+								creatorId={profileId}
 								price={profile.subscription_price}
 								creatorName={profile.display_name}
 							/>
 						{/if}
-						<a
-							href="/mensajes/{profileId}"
-							class="rounded-full border border-white/10 px-4 py-2 text-center text-sm text-pink-300 transition hover:bg-white/5"
-						>
-							Mensaje
-						</a>
+						{#if SOCIAL.messages}
+							<a
+								href="/mensajes/{profileId}"
+								class="rounded-full border border-white/10 px-4 py-2 text-center text-sm text-pink-300 transition hover:bg-white/5"
+							>
+								Mensaje
+							</a>
+						{/if}
 					</div>
 				{/if}
 			</div>
 		</div>
 
-		<!-- Contenido -->
+		<!-- Contenido aprobado -->
 		<div class="mt-6">
-			{#if canSeePrivate && privateItems.length > 0}
-				<!-- Tabs público / privado -->
-				<div class="mb-4 flex gap-1 rounded-xl border border-pink-900/30 bg-black/40 p-1">
-					<button
-						on:click={() => (activeTab = 'publico')}
-						class="flex-1 rounded-lg py-2 text-sm font-semibold transition
-							{activeTab === 'publico' ? 'bg-pink-600/20 text-pink-300' : 'text-pink-300/50 hover:text-pink-300'}"
-					>
-						Público ({publicItems.length})
-					</button>
-					<button
-						on:click={() => (activeTab = 'privado')}
-						class="flex-1 rounded-lg py-2 text-sm font-semibold transition
-							{activeTab === 'privado' ? 'bg-pink-600/20 text-pink-300' : 'text-pink-300/50 hover:text-pink-300'}"
-					>
-						Exclusivo ({privateItems.length})
-					</button>
-				</div>
+			<MediaGrid items={mediaItems} showActions={true} isOwner={isOwnProfile} />
+			{#if mediaError}<p class="mt-4 text-sm text-red-300">{mediaError}</p>{/if}
+			{#if mediaCursor}
+				<button on:click={() => loadMedia(true)} disabled={mediaLoading} class="mt-4 rounded-xl border border-pink-500/40 px-5 py-2 text-sm text-pink-200 disabled:opacity-50">
+					{mediaLoading ? 'Cargando...' : 'Cargar mas fotos'}
+				</button>
+			{/if}
 
-				{#if activeTab === 'publico'}
-					<MediaGrid
-						items={publicItems}
-						showActions={true}
-						isOwner={isOwnProfile}
-						canViewPrivate={canSeePrivate}
-					/>
-				{:else}
-					<MediaGrid
-						items={privateItems}
-						showActions={true}
-						isOwner={isOwnProfile}
-						canViewPrivate={true}
-					/>
-				{/if}
-			{:else}
-				<MediaGrid
-					items={mediaItems}
-					showActions={true}
-					isOwner={isOwnProfile}
-					canViewPrivate={canSeePrivate}
-				/>
-
-				{#if !isOwnProfile && !isSubscribed && privateItems.length > 0}
-					<div
-						class="mt-4 rounded-2xl border border-pink-500/30 bg-gradient-to-r from-pink-950/60 to-purple-950/60 p-6 text-center"
-					>
-						<svg
-							class="mx-auto mb-3 h-10 w-10 text-pink-400"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="1.5"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-							/>
-						</svg>
-						<h3 class="mb-1 font-bold text-pink-100">Contenido exclusivo</h3>
-						<p class="mb-4 text-sm text-pink-300/70">
-							{privateItems.length} publicación{privateItems.length !== 1 ? 'es' : ''} solo para suscriptoras
-						</p>
-						<SubscribeButton
-							creatorId={/** @type {string} */ (profileId)}
-							price={profile.subscription_price}
-							creatorName={profile.display_name}
-						/>
-					</div>
-				{/if}
+			{#if mediaItems.length === 0 && !mediaError}
+				<p class="py-8 text-center text-sm text-pink-300/50 italic">
+					Todavia no hay fotos aprobadas.
+				</p>
 			{/if}
 		</div>
 	</div>

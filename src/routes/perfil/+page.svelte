@@ -4,19 +4,22 @@
 	import { supabase } from '$lib/supabaseClient';
 	import { session, user, logout } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
-	import MediaGrid from '$lib/components/MediaGrid.svelte';
+	import UploadQueue from '$lib/components/UploadQueue.svelte';
 	import {
-		uploadToR2,
-		deleteR2Object,
-		validateImageFile,
-		MAX_UPLOAD_BYTES,
+		uploadMedia,
+		deleteCoverPhoto,
+		validateMediaFile,
 		R2_FOLDERS
 	} from '$lib/upload/r2Upload';
+	import { deleteMedia, loadCovers, loadOwnerMediaPage, moderationClass, moderationLabel } from '$lib/media/client';
 
 	let loading = true;
 	let nombre = '';
 	let email = '';
 	let bio = '';
+	let pais = '';
+	let ciudad = '';
+	let username = '';
 	let foto = '';
 	let editing = false;
 	let saving = false;
@@ -24,38 +27,51 @@
 	let avatarError = '';
 	let uploadProgress = 0;
 
-	/** @type {any[]} */
-	/** @type {any[]} */
-	let mediaItems = [];
-	let activeTab = 'publico';
+	/**
+	 * Elemento de la galeria propia. La URL firmada y los estados vienen del
+	 * servidor; las claves privadas nunca llegan al navegador.
+	 *
+	 * @typedef {Object} GalleryItem
+	 * @property {string} id
+	 * @property {string | null} original_filename
+	 * @property {string | null} mime_type
+	 * @property {number | null} byte_size
+	 * @property {string} created_at
+	 * @property {string} moderation_status
+	 * @property {string} processing_status
+	 * @property {string} upload_status
+	 * @property {string | null} rejection_reason
+	 * @property {string | null} previewUrl
+	 * @property {string | null} fullUrl
+	 * @property {boolean} originalAvailable
+	 */
 
-	/** @type {any[]} */
+	/** @type {GalleryItem[]} */
+	let galleryItems = [];
+	/** @type {string | null} */
+	let galleryCursor = null;
+	let galleryLoading = false;
+
 	/** @type {any[]} */
 	let bannerItems = [];
 	let currentBannerIndex = 0;
 	let bannerUploading = false;
 	let bannerProgress = 0;
+	let coverVisibility = 'privado';
+	let bannerError = '';
 
-	// Preview upload
-	/** @type {File | null} */
-	/** @type {File | null} */
-	let previewFile = null;
 	/** @type {string | null} */
+	let galleryError = null;
+
 	/** @type {string | null} */
-	let previewUrl = null;
-	let previewTitulo = '';
-	let previewDescripcion = '';
-	let previewEsPrivado = false;
-	let previewUploading = false;
-	let previewProgress = 0;
-	let showPreviewModal = false;
+	let deletingId = null;
 
 	onMount(async () => {
 		if (!$session?.user) {
 			goto('/login');
 			return;
 		}
-		await Promise.all([loadProfile(), loadMedia(), loadBanners()]);
+		await Promise.all([loadProfile(), loadGallery(), loadBanners()]);
 		loading = false;
 	});
 
@@ -71,27 +87,39 @@
 	async function loadProfile() {
 		const { data } = await supabase
 			.from('profiles')
-			.select(
-				'id, role, username, display_name, bio, avatar_key, is_verified, followers_count, media_count'
-			)
+			.select('id, role, username, display_name, bio, pais, ciudad, avatar_key, is_verified')
 			.eq('id', $session?.user?.id)
 			.maybeSingle();
 
 		if (data) {
 			nombre = data.display_name || data.username || nombre;
 			bio = data.bio || '';
-			foto = data.avatar_key || '';
+			pais = data.pais || '';
+			ciudad = data.ciudad || '';
+		}
+
+		// El avatar es publico y se guarda como URL permanente: asi el Home
+		// puede mostrarlo sin sesion y sin una llamada extra.
+		if (data?.avatar_key) {
+			foto = data.avatar_key;
+		} else {
+			foto = '';
 		}
 	}
 
 	async function saveProfile() {
 		if (saving) return;
 		saving = true;
+
+		// El avatar se confirma en el servidor al subir. Editar nombre/bio no
+		// debe reemplazarlo por una URL temporal de otra imagen del perfil.
 		await supabase.from('profiles').upsert({
 			id: $session?.user?.id,
 			display_name: nombre || null,
 			bio: bio || '',
-			avatar_key: foto || null
+			username: username || null,
+			pais: pais || null,
+			ciudad: ciudad || null
 		});
 		await supabase.auth.updateUser({ data: { nombre: nombre || null, bio: bio || '' } });
 		await loadProfile();
@@ -99,33 +127,32 @@
 		editing = false;
 	}
 
-	async function loadMedia() {
-		const { data } = await supabase
-			.from('media')
-			.select(
-				`id, user_id, tipo, public_url, storage_key, titulo, descripcion,
-				 es_privado, bucket, orden, created_at,
-				 media_likes(count), media_comments(count)`
-			)
-			.eq('user_id', $session?.user?.id)
-			.eq('tipo', 'photo')
-			.order('created_at', { ascending: false });
+	async function loadGallery(append = false) {
+		if (galleryLoading) return;
+		galleryError = null;
 
-		mediaItems = (data ?? []).map((m) => ({
-			...m,
-			like_count: m.media_likes?.[0]?.count ?? 0,
-			comment_count: m.media_comments?.[0]?.count ?? 0
-		}));
+		if (!$session?.user?.id) return;
+		galleryLoading = true;
+
+		try {
+			const page = await loadOwnerMediaPage({ cursor: append ? galleryCursor : null });
+			const incoming = /** @type {GalleryItem[]} */ (page.items);
+			galleryItems = append ? [...galleryItems, ...incoming.filter((row) => !galleryItems.some((current) => current.id === row.id))] : incoming;
+			galleryCursor = page.nextCursor;
+		} catch (e) {
+			galleryError = e instanceof Error ? e.message : 'No se pudo cargar la galeria.';
+			if (!append) galleryItems = [];
+		} finally {
+			galleryLoading = false;
+		}
 	}
 
 	async function loadBanners() {
-		const { data } = await supabase
-			.from('media')
-			.select('id, public_url, storage_key, orden')
-			.eq('user_id', $session?.user?.id)
-			.eq('tipo', 'banner')
-			.order('orden', { ascending: true });
-		bannerItems = data ?? [];
+		try {
+			bannerItems = await loadCovers($session?.user?.id ?? '');
+		} catch (error) {
+			bannerError = error instanceof Error ? error.message : 'No se pudieron cargar las portadas.';
+		}
 	}
 
 	// ---------- AVATAR ----------
@@ -134,7 +161,7 @@
 		if (!browser || !$session?.user) return;
 		const input = document.createElement('input');
 		input.type = 'file';
-		input.accept = 'image/jpeg,image/png,image/webp,image/gif';
+		input.accept = 'image/jpeg,image/png,image/webp';
 		input.onchange = async (e) => {
 			const file = /** @type {HTMLInputElement} */ (e.target)?.files?.[0];
 			if (!file) return;
@@ -142,16 +169,17 @@
 			avatarUploading = true;
 			uploadProgress = 0;
 			try {
-				const err = validateImageFile(file);
+				const err = validateMediaFile(file);
 				if (err) throw new Error(err);
-				const { publicUrl, key } = await uploadToR2(file, R2_FOLDERS.avatar, {
+
+				// El avatar vive en el bucket publico: se guarda la URL
+				// permanente, que es lo que el Home necesita para mostrarlo a
+				// un visitante sin sesion.
+				const { publicUrl } = await uploadMedia(file, R2_FOLDERS.avatar, {
 					onProgress: (p) => (uploadProgress = p)
 				});
-				const { error } = await supabase
-					.from('profiles')
-					.update({ avatar_key: publicUrl })
-					.eq('id', $session?.user?.id);
-				if (error) throw error;
+
+				if (!publicUrl) throw new Error('No se pudo confirmar el avatar.');
 				foto = publicUrl;
 			} catch (e) {
 				avatarError = e instanceof Error ? e.message : String(e);
@@ -174,32 +202,25 @@
 		if (!browser || !$session?.user) return;
 		const input = document.createElement('input');
 		input.type = 'file';
-		input.accept = 'image/jpeg,image/png,image/webp,image/gif';
+		input.accept = 'image/jpeg,image/png,image/webp';
 		input.onchange = async (e) => {
 			const file = /** @type {HTMLInputElement} */ (e.target)?.files?.[0];
 			if (!file) return;
 			bannerUploading = true;
+			bannerError = '';
 			bannerProgress = 0;
 			try {
-				const err = validateImageFile(file);
+				const err = validateMediaFile(file);
 				if (err) throw new Error(err);
-				const { publicUrl, key } = await uploadToR2(file, R2_FOLDERS.cover, {
+				// El objeto permanece privado. La visibilidad se elige explicitamente.
+				await uploadMedia(file, R2_FOLDERS.cover, {
+					visibility: coverVisibility,
 					onProgress: (p) => (bannerProgress = p)
 				});
-				const { error } = await supabase.from('media').insert({
-					user_id: $session?.user?.id,
-					tipo: 'banner',
-					storage_key: key,
-					public_url: publicUrl,
-					bucket: 'public',
-					es_privado: false,
-					orden: bannerItems.length
-				});
-				if (error) throw error;
 				await loadBanners();
 				currentBannerIndex = bannerItems.length - 1;
 			} catch (e) {
-				console.error('Banner error:', e);
+				bannerError = e instanceof Error ? e.message : 'No se pudo subir la portada.';
 			} finally {
 				bannerUploading = false;
 			}
@@ -207,11 +228,13 @@
 		input.click();
 	}
 
+	const deleteCover = deleteCoverPhoto;
+
 	async function deleteCurrentBanner() {
 		if (!bannerItems.length || !$session?.user) return;
 		const item = bannerItems[currentBannerIndex];
-		if (item.storage_key) await deleteR2Object(item.storage_key, R2_FOLDERS.cover);
-		await supabase.from('media').delete().eq('id', item.id);
+		const result = await deleteCover(item.id);
+		if (!result.ok) { bannerError = result.message ?? 'No se pudo retirar la portada.'; return; }
 		await loadBanners();
 		currentBannerIndex = Math.min(currentBannerIndex, bannerItems.length - 1);
 	}
@@ -226,76 +249,66 @@
 
 	// ---------- PUBLICACIÓN ----------
 
-	function openPublishModal() {
-		if (!browser) return;
-		const input = document.createElement('input');
-		input.type = 'file';
-		input.accept = 'image/jpeg,image/png,image/webp,image/gif';
-		input.onchange = async (e) => {
-			const file = /** @type {HTMLInputElement} */ (e.target)?.files?.[0];
-			if (!file) return;
-			const err = validateImageFile(file);
-			if (err) {
-				alert(err);
-				return;
-			}
-			previewFile = file;
-			previewUrl = URL.createObjectURL(file);
-			previewTitulo = '';
-			previewDescripcion = '';
-			previewEsPrivado = false;
-			showPreviewModal = true;
-		};
-		input.click();
+	/**
+	 * El archivo ya quedo registrado y encolado por el servidor. La galeria
+	 * muestra el estado real de procesamiento y moderacion.
+	 *
+	 * @param {{ asset: import('$lib/media/client').MediaAsset, file: File }} _payload
+	 */
+	async function handleUploaded(_payload) {
+		galleryError = null;
+		await loadGallery();
 	}
 
-	async function confirmPublish() {
-		if (!previewFile || !$session?.user || previewUploading) return;
-		previewUploading = true;
-		previewProgress = 0;
-		try {
-			const { publicUrl, key } = await uploadToR2(previewFile, R2_FOLDERS.post, {
-				onProgress: (p) => (previewProgress = p)
-			});
-			const { error } = await supabase.from('media').insert({
-				user_id: $session?.user?.id,
-				tipo: 'photo',
-				storage_key: key,
-				public_url: publicUrl,
-				bucket: previewEsPrivado ? 'private' : 'public',
-				es_privado: previewEsPrivado,
-				titulo: previewTitulo.trim() || null,
-				descripcion: previewDescripcion.trim() || null,
-				orden: mediaItems.length
-			});
-			if (error) throw error;
-			cancelPreview();
-			await loadMedia();
-		} catch (e) {
-			console.error('Publish error:', e);
-		} finally {
-			previewUploading = false;
+	/**
+	 * Solicita el borrado. La fila se oculta de inmediato y los objetos se
+	 * eliminan mediante un trabajo durable.
+	 *
+	 * @param {GalleryItem} item
+	 */
+	async function deleteGalleryItem(item) {
+		if (
+			!confirm(
+				`¿Eliminar "${item.original_filename ?? 'esta foto'}"? Esta accion no se puede deshacer.`
+			)
+		) {
+			return;
 		}
+
+		deletingId = item.id;
+		const result = await deleteMedia(item.id);
+		deletingId = null;
+
+		if (!result.ok) {
+			galleryError = result.message ?? 'No se pudo eliminar la foto.';
+			return;
+		}
+
+		galleryError = null;
+		galleryItems = galleryItems.filter((candidate) => candidate.id !== item.id);
 	}
 
-	function cancelPreview() {
-		if (previewUrl) URL.revokeObjectURL(previewUrl);
-		previewFile = null;
-		previewUrl = null;
-		showPreviewModal = false;
+	/**
+	 * @param {string} iso
+	 * @returns {string}
+	 */
+	function formatDate(iso) {
+		return new Date(iso).toLocaleDateString('es-ES', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric'
+		});
 	}
 
-	/** @param {string} id */
-	async function deleteMedia(id) {
-		const item = mediaItems.find((m) => m.id === id);
-		if (!item) return;
-		if (item.storage_key) await deleteR2Object(item.storage_key, R2_FOLDERS.post);
-		await supabase.from('media').delete().eq('id', id);
-		mediaItems = mediaItems.filter((m) => m.id !== id);
+	/**
+	 * @param {number | null} bytes
+	 * @returns {string}
+	 */
+	function formatBytes(bytes) {
+		if (!bytes && bytes !== 0) return '';
+		if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
-
-	$: publicItems = mediaItems.filter((m) => !m.es_privado);
-	$: privateItems = mediaItems.filter((m) => m.es_privado);
 
 	/** @param {string | null | undefined} name */
 	/** @param {string | null | undefined} name */
@@ -320,7 +333,7 @@
 {:else}
 	<!-- Banner -->
 	<div class="relative h-52 w-full overflow-hidden bg-black/60 md:h-72">
-		{#if bannerItems.length > 0}
+		{#if bannerItems.length > 0 && bannerItems[currentBannerIndex]?.public_url}
 			<img
 				src={bannerItems[currentBannerIndex].public_url}
 				alt="Portada"
@@ -348,6 +361,10 @@
 
 		<!-- Controles del banner -->
 		<div class="absolute top-3 right-3 flex gap-2">
+			<select bind:value={coverVisibility} aria-label="Visibilidad de la nueva portada" class="rounded-full bg-black/80 px-2 text-xs text-white">
+				<option value="privado">Nueva portada privada</option>
+				<option value="publico">Nueva portada publica</option>
+			</select>
 			<button
 				on:click={uploadBanner}
 				disabled={bannerUploading}
@@ -368,6 +385,7 @@
 
 	<!-- Perfil -->
 	<div class="mx-auto w-full max-w-5xl px-4">
+		{#if bannerError}<p class="p-3 text-sm text-red-300">{bannerError}</p>{/if}
 		<div class="rounded-b-2xl border border-t-0 border-pink-900/30 bg-black/50 px-6 pb-6">
 			<div class="flex flex-col gap-4 pt-4 sm:flex-row sm:items-end sm:gap-6">
 				<!-- Avatar -->
@@ -468,151 +486,105 @@
 			</div>
 		</div>
 
-		<!-- Contenido -->
+		<!-- Galeria propia -->
 		<div class="mt-6 pb-8">
-			<div class="mb-4 flex items-center justify-between">
-				<h2 class="text-xl font-bold text-pink-100">Mi contenido</h2>
-				<button
-					on:click={openPublishModal}
-					class="rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg transition hover:brightness-110"
-				>
-					+ Publicar
-				</button>
+			<div class="mb-4">
+				<h2 class="text-xl font-bold text-pink-100">Mi galeria</h2>
+				<p class="mt-1 text-sm text-pink-300/50">
+					Tus fotos pasan por proteccion de rostros y revision antes de publicarse. Solo tu puedes
+					verlas mientras estan pendientes.
+				</p>
 			</div>
 
-			<!-- Tabs -->
-			<div class="mb-4 flex gap-1 rounded-xl border border-pink-900/30 bg-black/40 p-1">
-				<button
-					on:click={() => (activeTab = 'publico')}
-					class="flex-1 rounded-lg py-2 text-sm font-semibold transition
-						{activeTab === 'publico' ? 'bg-pink-600/20 text-pink-300' : 'text-pink-300/50 hover:text-pink-300'}"
+			{#if galleryError}
+				<p
+					class="mb-4 rounded-xl border border-red-500/30 bg-red-900/20 px-4 py-3 text-sm text-red-400"
 				>
-					Público ({publicItems.length})
-				</button>
-				<button
-					on:click={() => (activeTab = 'privado')}
-					class="flex-1 rounded-lg py-2 text-sm font-semibold transition
-						{activeTab === 'privado' ? 'bg-pink-600/20 text-pink-300' : 'text-pink-300/50 hover:text-pink-300'}"
-				>
-					Exclusivo ({privateItems.length})
-				</button>
-			</div>
-
-			{#if activeTab === 'publico'}
-				<MediaGrid
-					items={publicItems}
-					showActions={true}
-					isOwner={true}
-					showDelete={true}
-					onDelete={deleteMedia}
-				/>
-			{:else}
-				<MediaGrid
-					items={privateItems}
-					showActions={true}
-					isOwner={true}
-					showDelete={true}
-					canViewPrivate={true}
-					onDelete={deleteMedia}
-				/>
+					{galleryError}
+				</p>
 			{/if}
-		</div>
-	</div>
-{/if}
 
-<!-- Modal de publicación -->
-{#if showPreviewModal && previewUrl}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
-		role="dialog"
-		aria-modal="true"
-	>
-		<div class="w-full max-w-md overflow-hidden rounded-2xl border border-pink-900/30 bg-black">
-			<div class="relative">
-				<img src={previewUrl} alt="Preview" class="max-h-64 w-full object-cover" />
-				<button
-					on:click={cancelPreview}
-					class="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
-					aria-label="Cerrar"
+			<div class="rounded-2xl border border-pink-900/30 bg-black/40 p-5">
+				<UploadQueue onUploaded={handleUploaded} />
+			</div>
+
+			{#if galleryItems.length === 0 && !galleryError}
+				<p
+					class="mt-6 rounded-xl border border-dashed border-pink-900/40 bg-black/20 px-6 py-12 text-center text-sm text-pink-300/50"
 				>
-					×
+					Tu galeria esta vacia. Sube tu primera foto para empezar.
+				</p>
+			{:else}
+				<ul class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+					{#each galleryItems as item (item.id)}
+						<li class="overflow-hidden rounded-xl border border-white/5 bg-black/30">
+							<div class="relative flex aspect-square items-center justify-center bg-white/5">
+								{#if item.previewUrl}
+									<a
+										href={item.fullUrl ?? item.previewUrl}
+										target="_blank"
+										rel="noreferrer"
+										class="h-full w-full"
+									>
+										<img
+											src={item.previewUrl}
+											alt={item.original_filename ?? 'Foto'}
+											loading="lazy"
+											class="h-full w-full object-cover"
+										/>
+									</a>
+								{:else if item.processing_status === 'failed' || item.moderation_status === 'blocked'}
+									<p class="px-3 text-center text-xs text-red-400">
+										No se pudo proteger esta foto. Eliminala y vuelve a intentarlo.
+									</p>
+								{:else}
+									<div class="flex flex-col items-center gap-2 px-3 text-center">
+										<div
+											class="h-6 w-6 animate-spin rounded-full border-2 border-pink-500 border-t-transparent"
+											role="status"
+											aria-label="Procesando foto"
+										></div>
+										<p class="text-[11px] text-pink-300/60">Procesando...</p>
+									</div>
+								{/if}
+							</div>
+
+							<div class="p-3">
+								<p class="truncate text-xs text-pink-100">
+									{item.original_filename ?? 'Foto'}
+								</p>
+								<p class="mt-0.5 text-[11px] text-pink-400/50">
+									{formatDate(item.created_at)}
+									{#if item.byte_size}· {formatBytes(item.byte_size)}{/if}
+								</p>
+								<p class="mt-1 text-[11px] {moderationClass(item.moderation_status)}">
+									{moderationLabel(item.moderation_status)}
+								</p>
+								{#if item.rejection_reason}
+									<p class="mt-1 text-[11px] text-red-300/80">{item.rejection_reason}</p>
+								{/if}
+								{#if item.originalAvailable}
+									<p class="mt-1 text-[10px] text-pink-400/40">
+										Original privado disponible 30 dias.
+									</p>
+								{/if}
+								<button
+									on:click={() => deleteGalleryItem(item)}
+									disabled={deletingId !== null}
+									class="mt-2 w-full rounded-lg border border-white/10 px-2 py-1.5 text-xs text-white/50 transition hover:border-red-500/40 hover:text-red-400 disabled:opacity-40"
+								>
+									{deletingId === item.id ? 'Eliminando...' : 'Eliminar'}
+								</button>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+			{#if galleryCursor}
+				<button on:click={() => loadGallery(true)} disabled={galleryLoading} class="mt-4 rounded-xl border border-pink-500/40 px-5 py-2 text-sm text-pink-200 disabled:opacity-50">
+					{galleryLoading ? 'Cargando...' : 'Cargar mas fotos'}
 				</button>
-			</div>
-
-			<div class="p-5">
-				<h3 class="mb-4 font-bold text-pink-100">Nueva publicación</h3>
-
-				<div class="mb-3">
-					<input
-						bind:value={previewTitulo}
-						maxlength="100"
-						placeholder="Título (opcional)..."
-						class="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-white/30 focus:border-pink-500 focus:outline-none"
-					/>
-				</div>
-
-				<div class="mb-4">
-					<textarea
-						bind:value={previewDescripcion}
-						maxlength="500"
-						rows="2"
-						placeholder="Descripción (opcional)..."
-						class="w-full resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-white/30 focus:border-pink-500 focus:outline-none"
-					></textarea>
-				</div>
-
-				<!-- Toggle privado -->
-				<div class="mb-5 flex items-center justify-between">
-					<div>
-						<p class="text-sm font-medium text-pink-100">Contenido exclusivo</p>
-						<p class="text-xs text-pink-300/50">Solo suscriptoras</p>
-					</div>
-					<button
-						role="switch"
-						aria-checked={previewEsPrivado}
-						on:click={() => (previewEsPrivado = !previewEsPrivado)}
-						class="relative h-7 w-12 rounded-full transition {previewEsPrivado
-							? 'bg-pink-600'
-							: 'bg-white/10'}"
-					>
-						<span
-							class="absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform {previewEsPrivado
-								? 'translate-x-5'
-								: 'translate-x-0.5'}"
-						></span>
-					</button>
-				</div>
-
-				{#if previewUploading && previewProgress > 0}
-					<div class="mb-4">
-						<div class="mb-1 flex justify-between text-xs text-pink-300/70">
-							<span>Subiendo...</span><span>{previewProgress}%</span>
-						</div>
-						<div class="h-2 w-full rounded-full bg-white/10">
-							<div
-								class="h-2 rounded-full bg-gradient-to-r from-pink-500 to-purple-500 transition-all"
-								style="width: {previewProgress}%"
-							></div>
-						</div>
-					</div>
-				{/if}
-
-				<div class="flex gap-3">
-					<button
-						on:click={cancelPreview}
-						class="flex-1 rounded-xl border border-white/10 py-2.5 text-sm text-white/60 hover:bg-white/5"
-					>
-						Cancelar
-					</button>
-					<button
-						on:click={confirmPublish}
-						disabled={previewUploading}
-						class="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-40"
-					>
-						{previewUploading ? 'Subiendo...' : 'Publicar'}
-					</button>
-				</div>
-			</div>
+			{/if}
 		</div>
 	</div>
 {/if}

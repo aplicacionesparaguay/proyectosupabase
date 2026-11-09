@@ -4,6 +4,7 @@
 	import { page } from '$app/stores';
 	import { session, user } from '$lib/stores/auth';
 	import { supabase } from '$lib/supabaseClient';
+	import { SOCIAL } from '$lib/featureFlags';
 
 	/**
 	 * @typedef {Object} Message
@@ -36,6 +37,11 @@
 		}
 		if (otherId === $user?.id) {
 			goto('/mensajes');
+			return;
+		}
+
+		if (!SOCIAL.messages) {
+			loading = false;
 			return;
 		}
 

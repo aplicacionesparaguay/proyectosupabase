@@ -2,6 +2,7 @@
 	import { supabase } from '$lib/supabaseClient';
 	import { user } from '$lib/stores/auth';
 	import LikeButton from './LikeButton.svelte';
+	import { SOCIAL } from '$lib/featureFlags';
 
 	/**
 	 * @typedef {Object} MediaItem
@@ -56,6 +57,7 @@
 	/** @param {string} mediaId */
 	/** @param {string} mediaId */
 	async function loadComments(mediaId) {
+		if (!SOCIAL.comments) return;
 		loadingComments = true;
 		const { data } = await supabase
 			.from('media_comments')
@@ -67,6 +69,7 @@
 	}
 
 	async function addComment() {
+		if (!SOCIAL.comments) return;
 		if (!$user || !selected || !newComment.trim() || sendingComment) return;
 		sendingComment = true;
 
@@ -253,38 +256,46 @@
 					<p class="mb-3 text-sm text-pink-300/70">{selected.descripcion}</p>
 				{/if}
 
-				<div class="mb-4 flex items-center gap-3">
-					<LikeButton mediaId={selected.id} />
-					<span class="text-xs text-white/40">{comments.length} comentarios</span>
-				</div>
+				{#if SOCIAL.likes || SOCIAL.comments}
+					<div class="mb-4 flex items-center gap-3">
+						{#if SOCIAL.likes}
+							<LikeButton mediaId={selected.id} />
+						{/if}
+						{#if SOCIAL.comments}
+							<span class="text-xs text-white/40">{comments.length} comentarios</span>
+						{/if}
+					</div>
+				{/if}
 
 				<!-- Comentarios -->
-				<div class="max-h-48 space-y-2 overflow-y-auto">
-					{#if loadingComments}
-						<p class="text-sm text-white/40">Cargando...</p>
-					{:else}
-						{#each comments as c (c.id)}
-							<div class="flex gap-2">
-								<div
-									class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-pink-900/50 text-xs font-bold text-pink-300"
-								>
-									{getInitials(c.profiles?.display_name ?? c.profiles?.username)}
-								</div>
-								<div>
-									<span class="text-xs font-semibold text-pink-300"
-										>{c.profiles?.display_name ?? c.profiles?.username ?? 'Usuario'}</span
+				{#if SOCIAL.comments}
+					<div class="max-h-48 space-y-2 overflow-y-auto">
+						{#if loadingComments}
+							<p class="text-sm text-white/40">Cargando...</p>
+						{:else}
+							{#each comments as c (c.id)}
+								<div class="flex gap-2">
+									<div
+										class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-pink-900/50 text-xs font-bold text-pink-300"
 									>
-									<p class="text-sm text-white/80">{c.contenido}</p>
+										{getInitials(c.profiles?.display_name ?? c.profiles?.username)}
+									</div>
+									<div>
+										<span class="text-xs font-semibold text-pink-300"
+											>{c.profiles?.display_name ?? c.profiles?.username ?? 'Usuario'}</span
+										>
+										<p class="text-sm text-white/80">{c.contenido}</p>
+									</div>
 								</div>
-							</div>
-						{/each}
-						{#if comments.length === 0}
-							<p class="text-sm text-white/30 italic">Sé la primera en comentar.</p>
+							{/each}
+							{#if comments.length === 0}
+								<p class="text-sm text-white/30 italic">Sé la primera en comentar.</p>
+							{/if}
 						{/if}
-					{/if}
-				</div>
+					</div>
+				{/if}
 
-				{#if $user}
+				{#if $user && SOCIAL.comments}
 					<div class="mt-3 flex gap-2">
 						<input
 							bind:value={newComment}

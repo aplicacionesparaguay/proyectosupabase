@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { session, user } from '$lib/stores/auth';
 	import { supabase } from '$lib/supabaseClient';
+	import { SOCIAL } from '$lib/featureFlags';
 
 	/**
 	 * @typedef {Object} Notification
@@ -23,6 +24,11 @@
 	onMount(async () => {
 		if (!$session?.user) {
 			goto('/login');
+			return;
+		}
+
+		if (!SOCIAL.notifications) {
+			loading = false;
 			return;
 		}
 

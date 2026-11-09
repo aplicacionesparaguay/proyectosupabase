@@ -16,6 +16,8 @@
  */
 
 import { dev } from '$app/environment';
+import { mediaServerQuery } from '$lib/server/mediaDb';
+import { coverReadUrl } from '$lib/server/profileImages';
 
 /** Máximo de creadoras devueltas al Home. */
 const LIMIT = 24;
@@ -42,7 +44,8 @@ const MISSING_COLUMN_CODES = new Set(['PGRST204', '42703']);
  * @property {string | null} username
  * @property {string | null} city
  * @property {string | null} countryName
- * @property {string | null} photoUrl
+ * @property {string | null} coverUrl portada (imagen principal)
+ * @property {string | null} avatarUrl avatar (insignia secundaria)
  * @property {boolean} isVerified
  */
 
@@ -59,6 +62,7 @@ const MISSING_COLUMN_CODES = new Set(['PGRST204', '42703']);
  * @property {string | null} [username]
  * @property {boolean | null} [is_verified]
  * @property {string | null} [avatar_key]
+ * @property {boolean | null} [is_banned]
  * @property {string | null} [country_code]
  * @property {string | null} [city]
  */
@@ -79,13 +83,16 @@ function usableUrl(value) {
 }
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ locals }) {
+export async function load({ locals, setHeaders }) {
+	setHeaders({ 'Cache-Control': 'private, no-store' });
 	// 1) Creadoras. Columnas explícitas, nunca '*'.
-	//    Ni email, ni teléfono, ni subscription_price, ni is_banned.
+	//    Ni email, ni teléfono, ni subscription_price.
+	//    `is_banned` sí se lee: es la única forma segura de no mostrar
+	//    cuentas suspendidas, y está verificado que es legible por anónimo.
 	const primary = await locals.supabase
 		.from('profiles')
 		.select(
-			'id, display_name, username, role, is_verified, avatar_key, country_code, city, created_at'
+			'id, display_name, username, role, is_verified, avatar_key, is_banned, country_code, city, created_at'
 		)
 		.eq('role', 'creator')
 		.order('created_at', { ascending: false })
@@ -101,7 +108,7 @@ export async function load({ locals }) {
 		if (primary.error.code && MISSING_COLUMN_CODES.has(primary.error.code)) {
 			const fallback = await locals.supabase
 				.from('profiles')
-				.select('id, display_name, username, role, is_verified, avatar_key, created_at')
+				.select('id, display_name, username, role, is_verified, avatar_key, is_banned, created_at')
 				.eq('role', 'creator')
 				.order('created_at', { ascending: false })
 				.limit(LIMIT);
@@ -118,7 +125,12 @@ export async function load({ locals }) {
 		}
 	}
 
-	const rows = creatorRows ?? [];
+	const rows = (creatorRows ?? []).filter(
+		// Solo se descarta lo que está explícitamente baneado. Un NULL
+		// significa "sin dato", no "suspendida", así que no se descarta:
+		// excluir NULL dejaría fuera a quien nunca fue moderado.
+		(row) => row.is_banned !== true
+	);
 
 	if (rows.length === 0) {
 		return { creadoras: [] };
@@ -145,40 +157,72 @@ export async function load({ locals }) {
 		countryByCode.set(row.code, row.name);
 	}
 
-	// 3) Foto de cada creadora: una sola consulta para todas.
-	//    Se asocia el primer banner por orden. Sin N+1.
-	const bannerQuery = await locals.supabase
+	// 3) Portada de cada creadora: una sola consulta para todas, sin N+1.
+	//    Se asocia la primera portada VÁLIDA por `orden`.
+	//
+	//    LA VISIBILIDAD SE DECIDE SOLO POR LA COLUMNA `visibilidad`.
+	//    `public_url` y `storage_path` NO dicen nada sobre si una portada
+	//    puede mostrarse en Home: un objeto puede tener URL perfectamente
+	//    formada y seguir siendo privado, o al revés. Usar la URL como
+	//    criterio sería adivinar la intención en vez de leerla.
+	//
+	//    La clave solo se lee en el servidor. Incluso las portadas visibles
+	//    publicamente viven en R2 privado y reciben una URL firmada breve.
+	const bannerQuery = await mediaServerQuery((db) => db
 		.from('user_banners')
-		.select('user_id, public_url, orden')
+		.select('user_id, public_url, storage_path, storage_bucket, orden, visibilidad')
 		.in('user_id', ids)
-		.order('orden', { ascending: true });
+		.eq('visibilidad', 'publico')
+		.order('orden', { ascending: true }).limit(LIMIT * 100));
 
 	if (bannerQuery.error && dev) {
-		console.error('Error cargando banners de creadoras:', bannerQuery.error);
+		console.error('Error cargando portadas de creadoras');
 	}
 
 	/** @type {Map<string, string>} */
-	const firstBannerByUser = new Map();
+	const coverByUser = new Map();
 
 	for (const row of bannerQuery.data ?? []) {
-		if (firstBannerByUser.has(row.user_id)) continue;
-		const url = usableUrl(row.public_url);
-		if (url) firstBannerByUser.set(row.user_id, url);
+		// Defensa en profundidad: la cláusula `.eq()` ya filtra en la
+		// consulta, pero si algo la saltara, aquí tampoco se admitiría una
+		// fila que no diga explícitamente 'publico'.
+		if (row.visibilidad !== 'publico' || !ids.includes(row.user_id)) continue;
+
+		if (coverByUser.has(row.user_id)) continue;
+
+		const url = await coverReadUrl(row);
+		if (url) coverByUser.set(row.user_id, url);
 	}
 
 	// 4) Proyección a la forma que consume CreatorCard.
-	//    Solo campos públicos: nada de email, subscription_price,
-	//    is_banned ni información de creator_requests/admin_users.
+	//    Solo campos públicos: nada de email, subscription_price ni
+	//    información de creator_requests/admin_users.
+	//
+	//    PORTADA Y AVATAR SON INDEPENDIENTES:
+	//      · coverUrl  <- portada explicitamente publica, URL firmada por servidor
+	//      · avatarUrl <- profiles.avatar_key
+	//    Ninguno sustituye al otro. Antes la tarjeta tenía un único
+	//    `photoUrl` que hacía `avatar_key ?? primerBanner`, de modo que
+	//    el avatar ocupaba el lugar de la portada.
+	//
+	//    Una creadora sin portada válida NO entra en la grilla: si se
+	//    mostrara, la tarjeta saldría sin imagen principal.
 	/** @type {Creadora[]} */
-	const creadoras = rows.map((row) => ({
-		id: row.id,
-		displayName: row.display_name ?? null,
-		username: row.username ?? null,
-		city: row.city ?? null,
-		countryName: row.country_code ? (countryByCode.get(row.country_code) ?? null) : null,
-		photoUrl: usableUrl(row.avatar_key) ?? firstBannerByUser.get(row.id) ?? null,
-		isVerified: row.is_verified === true
-	}));
+	const creadoras = rows
+		.map((row) => {
+			const coverUrl = coverByUser.get(row.id) ?? null;
+			return {
+				id: row.id,
+				displayName: row.display_name ?? null,
+				username: row.username ?? null,
+				city: row.city ?? null,
+				countryName: row.country_code ? (countryByCode.get(row.country_code) ?? null) : null,
+				coverUrl,
+				avatarUrl: usableUrl(row.avatar_key),
+				isVerified: row.is_verified === true
+			};
+		})
+		.filter((creadora) => creadora.coverUrl !== null);
 
 	return { creadoras };
 }

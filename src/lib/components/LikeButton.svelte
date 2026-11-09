@@ -2,6 +2,7 @@
 	import { supabase } from '$lib/supabaseClient';
 	import { user } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
+	import { SOCIAL } from '$lib/featureFlags';
 
 	/** @type {string} */
 	export let mediaId;
@@ -14,6 +15,7 @@
 	let loading = false;
 
 	onMount(async () => {
+		if (!SOCIAL.likes) return;
 		if (!$user) return;
 		const { data } = await supabase
 			.from('media_likes')
@@ -25,6 +27,7 @@
 	});
 
 	async function toggle() {
+		if (!SOCIAL.likes) return;
 		if (!$user || loading) return;
 		loading = true;
 

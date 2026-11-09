@@ -48,9 +48,13 @@ export async function ensureProfile(authUser) {
 	if (readError) return { data: null, error: readError };
 	if (existing) return { data: existing, error: null };
 
+	// `role` NO se envia: la base de datos lo pone por defecto ('fan') y el
+	// trigger `trg_protect_profile_insert` lo fuerza de todas formas. Ademas,
+	// la migracion de administracion cierra el privilegio INSERT sobre esa
+	// columna, asi que enviarla desde aqui daria error de permisos.
 	const { data, error } = await supabase
 		.from('profiles')
-		.insert({ id, role: 'fan', display_name: deriveDisplayName(authUser) })
+		.insert({ id, display_name: deriveDisplayName(authUser) })
 		.select('id, role')
 		.maybeSingle();
 
